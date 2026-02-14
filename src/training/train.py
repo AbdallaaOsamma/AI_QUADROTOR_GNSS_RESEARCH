@@ -17,6 +17,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
 
 from src.environments.airsim_env import AirSimDroneEnv
+from src.training.callbacks import RewardLoggingCallback
 
 
 def make_env(cfg: dict):
@@ -97,10 +98,12 @@ def main():
     print(f"[train_ppo] Run directory: {run_dir}")
     print(f"[train_ppo] Total timesteps: {total_timesteps}")
 
+    reward_cb = RewardLoggingCallback()
+
     try:
         model.learn(
             total_timesteps=total_timesteps,
-            callback=[checkpoint_cb, eval_cb],
+            callback=[checkpoint_cb, eval_cb, reward_cb],
         )
     except KeyboardInterrupt:
         print("\n[train_ppo] Training interrupted by user.")
