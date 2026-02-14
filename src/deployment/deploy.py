@@ -11,7 +11,6 @@ Usage:
 import argparse
 import math
 import os
-from datetime import datetime
 
 import numpy as np
 import yaml
@@ -105,7 +104,7 @@ def main():
     max_steps = int(args.duration_s / dt)
     print(f"[deploy] Model: {args.model}")
     print(f"[deploy] Duration: {args.duration_s}s ({max_steps} steps)")
-    print(f"[deploy] Starting deployment...")
+    print("[deploy] Starting deployment...")
 
     obs = vec_env.reset()
     total_reward = 0.0

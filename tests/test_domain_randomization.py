@@ -4,7 +4,6 @@ Verifies that depth noise stays within [0, 1] bounds.
 Runs without AirSim.
 """
 import numpy as np
-import pytest
 
 
 class TestDepthNoise:

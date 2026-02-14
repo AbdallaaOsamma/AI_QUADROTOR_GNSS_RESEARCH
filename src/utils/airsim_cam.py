@@ -1,5 +1,8 @@
 # src/utils/airsim_cam.py
-import airsim, numpy as np, cv2, os
+import airsim
+import numpy as np
+import cv2
+import os
 
 def grab_rgb_frame(client, camera_name="0", image_type=airsim.ImageType.Scene):
     resp = client.simGetImage(camera_name, image_type)

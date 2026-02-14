@@ -16,7 +16,6 @@ Usage:
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
 
 # Define ablation experiments
@@ -192,7 +191,7 @@ Examples:
 
     # Summary
     print(f"\n{'='*70}")
-    print(f"  ABLATION SUITE COMPLETE")
+    print("  ABLATION SUITE COMPLETE")
     print(f"{'='*70}")
     if failed:
         print(f"\n  Failed experiments ({len(failed)}):")
@@ -201,12 +200,12 @@ Examples:
     else:
         print(f"\n  All {len(experiments)} experiment(s) completed successfully!")
 
-    print(f"\n  View results in TensorBoard:")
-    print(f"    tensorboard --logdir logs/ppo/")
-    print(f"\n  Evaluate models:")
-    print(f"    python -m src.evaluation.evaluate --model logs/ppo/abl1_full_reward/best_model/best_model.zip")
-    print(f"\n  Test safety ablation at deployment:")
-    print(f"    python -m src.deployment.deploy --model <model> --no_safety")
+    print("\n  View results in TensorBoard:")
+    print("    tensorboard --logdir logs/ppo/")
+    print("\n  Evaluate models:")
+    print("    python -m src.evaluation.evaluate --model logs/ppo/abl1_full_reward/best_model/best_model.zip")
+    print("\n  Test safety ablation at deployment:")
+    print("    python -m src.deployment.deploy --model <model> --no_safety")
     print(f"{'='*70}\n")
 
     return 1 if failed else 0

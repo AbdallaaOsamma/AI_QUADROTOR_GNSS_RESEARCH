@@ -242,7 +242,7 @@ def main():
     except ImportError:
         print("[nav_test] matplotlib not available — skipping trajectory.png")
 
-    print(f"\n[nav_test] Summary:")
+    print("\n[nav_test] Summary:")
     for k, v in summary.items():
         print(f"  {k}: {v}")
 

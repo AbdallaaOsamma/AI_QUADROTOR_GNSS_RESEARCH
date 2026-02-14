@@ -9,7 +9,6 @@ Usage:
 from __future__ import annotations
 
 import csv
-import json
 import os
 
 import matplotlib
@@ -209,9 +208,9 @@ def plot_reward_components(
         log_dir: Path to training log directory.
         output_path: Ignored (for API consistency).
     """
-    print(f"[plots] For training curves, use:")
+    print("[plots] For training curves, use:")
     print(f"[plots]   tensorboard --logdir {log_dir}")
-    print(f"[plots] Automated extraction from tfevents not implemented")
+    print("[plots] Automated extraction from tfevents not implemented")
 
 
 if __name__ == "__main__":

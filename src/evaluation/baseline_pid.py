@@ -12,7 +12,6 @@ Usage:
 import argparse
 import csv
 import json
-import math
 import os
 from datetime import datetime
 
@@ -57,7 +56,6 @@ def main():
 
         trajectory = []
         collided = False
-        prev_pos = None
 
         for step in range(args.max_steps):
             # Constant forward velocity, no lateral, no yaw

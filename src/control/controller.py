@@ -4,7 +4,6 @@ import argparse
 import yaml
 import os
 import airsim
-import cv2  # make sure opencv-python is installed
 
 from src.utils.logging import EpisodeLogger
 from src.utils.airsim_cam import grab_rgb_frame, save_frame_bgr
