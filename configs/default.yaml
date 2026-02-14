@@ -1,0 +1,17 @@
+sim:
+  host: "127.0.0.1"
+  control_rate_hz: 70        # PID/control loop frequency (Hz)
+
+uav:
+  takeoff_alt_m: 4         # target hover altitude (meters)
+
+pid:
+  # PID gains tuned for street navigation - more responsive
+  vx: {kp: 0.8, ki: 0.05, kd: 0.2,  limit: 2.5}
+  vy: {kp: 0.8, ki: 0.05, kd: 0.2,  limit: 2.5}
+  vz: {kp: 0.9, ki: 0.08, kd: 0.3, limit: 1.8}
+  rz: {kp: 0.7, ki: 0.00, kd: 0.12,  limit: 1.2}
+
+logging:
+  out_dir: "data/expert"
+  print_every: 10

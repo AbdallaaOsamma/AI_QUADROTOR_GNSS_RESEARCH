@@ -1,0 +1,12 @@
+airsim
+opencv-python
+numpy
+pandas
+matplotlib
+tqdm
+pyyaml
+torch
+gymnasium
+stable-baselines3
+tensorboard
+shimmy>=0.2.1

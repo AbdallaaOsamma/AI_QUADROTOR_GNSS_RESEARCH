@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+env/
+venv/
+.env
+.venv
+.venv311/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Data / binaries
+data/
+sim_env/
+
+# Model artifacts
+*.pt
+*.pth
+*.zip
+*.joblib
+*.onnx
+models/
+logs/
+
+# PDFs (kept locally, not in git)
+*.pdf
+
+# OS
+.DS_Store
+Thumbs.db
