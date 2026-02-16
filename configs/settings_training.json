@@ -2,8 +2,7 @@
   "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/main/docs/settings.md",
   "SettingsVersion": 1.2,
   "SimMode": "Multirotor",
-  "ViewMode": "NoDisplay",
-  "SubWindows": [],
+  "ViewMode": "FlyWithMe",
   "Vehicles": {
     "Drone1": {
       "VehicleType": "SimpleFlight",
