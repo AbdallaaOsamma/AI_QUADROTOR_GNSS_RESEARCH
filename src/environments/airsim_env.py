@@ -13,6 +13,7 @@ sleeps) and moveByVelocityZBodyFrameAsync for active altitude hold.
 from __future__ import annotations
 
 import math
+import time
 
 import airsim
 import cv2
@@ -74,6 +75,7 @@ class AirSimDroneEnv(gym.Env):
         }
         self.prev_action = np.zeros(3, dtype=np.float32)
         self.step_count = 0
+        self._last_col_ts = 0  # updated in reset()
 
     # ------------------------------------------------------------------
     # Domain Randomization
@@ -160,8 +162,13 @@ class AirSimDroneEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        # Unpause sim — step() leaves it paused for lockstep,
+        # and blocking calls (takeoff, moveToZ) hang on a paused sim.
+        self.client.simPause(False)
+
         for attempt in range(self.MAX_RESET_RETRIES):
             self.client.reset()
+            time.sleep(0.5)  # let physics settle after reset
             self.client.enableApiControl(True)
             self.client.armDisarm(True)
             self.client.takeoffAsync().join()
@@ -177,6 +184,14 @@ class AirSimDroneEnv(gym.Env):
                 ),
                 ignore_collision=True,
             )
+
+        # Record collision timestamp to distinguish stale flags from
+        # real in-episode collisions (AirSim doesn't reliably clear
+        # has_collided on reset).
+        self._last_col_ts = self.client.simGetCollisionInfo().time_stamp
+
+        # Enter lockstep mode for deterministic training
+        self.client.simPause(True)
 
         self._apply_domain_randomization()
         self.prev_action = np.zeros(3, dtype=np.float32)
@@ -213,7 +228,11 @@ class AirSimDroneEnv(gym.Env):
 
         # Reward via pluggable function
         vx_body = obs["velocity"][0]
-        has_collided = self.client.simGetCollisionInfo().has_collided
+        col_info = self.client.simGetCollisionInfo()
+        has_collided = (
+            col_info.has_collided
+            and col_info.time_stamp != self._last_col_ts
+        )
         reward, reward_info = self.reward_fn(
             vx_body, has_collided, action, self.prev_action
         )
