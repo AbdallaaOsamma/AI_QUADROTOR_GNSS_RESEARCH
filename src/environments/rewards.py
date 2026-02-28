@@ -57,11 +57,12 @@ class WaypointRewardFunction:
 
     def __init__(self, cfg: Optional[dict] = None):
         cfg = cfg or {}
-        self.w_heading = cfg.get("w_heading", 0.3)
-        self.w_dist = cfg.get("w_dist", 0.5)
-        self.w_goal = cfg.get("w_goal", 10.0)
-        self.w_mission = cfg.get("w_mission", 50.0)
-        self.w_collision = cfg.get("w_collision", -100.0)
+        self.w_heading    = cfg.get("w_heading",    0.5)
+        self.w_progress   = cfg.get("w_progress",   0.3)
+        self.w_dist       = cfg.get("w_dist",       0.3)
+        self.w_goal       = cfg.get("w_goal",      10.0)
+        self.w_mission    = cfg.get("w_mission",   50.0)
+        self.w_collision  = cfg.get("w_collision", -100.0)
         self.w_smoothness = cfg.get("w_smoothness", -0.1)
 
         # Tracks previous normalised distance for delta computation.
@@ -82,6 +83,8 @@ class WaypointRewardFunction:
         """Return (total_reward, info_dict) for a single step."""
         # Heading reward: cos(bearing) in body frame — max when facing goal
         r_heading = self.w_heading * cos_theta
+        # Progress reward: only forward flight rewarded — backward gives zero
+        r_progress = self.w_progress * max(0.0, vx_body)
 
         # Distance reward: delta-based shaping
         if self._prev_dist_norm is None:
@@ -103,14 +106,15 @@ class WaypointRewardFunction:
         r_collision = self.w_collision if has_collided else 0.0
         r_smoothness = self.w_smoothness * float(np.linalg.norm(action - prev_action))
 
-        total = r_heading + r_dist + r_goal + r_mission + r_collision + r_smoothness
+        total = r_heading + r_progress + r_dist + r_goal + r_mission + r_collision + r_smoothness
 
         info = {
-            "r_heading": r_heading,
-            "r_dist": r_dist,
-            "r_goal": r_goal,
-            "r_mission": r_mission,
-            "r_collision": r_collision,
+            "r_heading":    r_heading,
+            "r_progress":   r_progress,
+            "r_dist":       r_dist,
+            "r_goal":       r_goal,
+            "r_mission":    r_mission,
+            "r_collision":  r_collision,
             "r_smoothness": r_smoothness,
         }
         return total, info

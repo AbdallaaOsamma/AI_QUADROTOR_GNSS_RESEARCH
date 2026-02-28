@@ -54,6 +54,8 @@ class AirSimDroneEnv(gym.Env):
         self.goal_radius_m = env_cfg.get("goal_radius_m", 3.0)
         self.max_goal_dist_m = env_cfg.get("max_goal_dist_m", 30.0)
         self.waypoint_arena_half = env_cfg.get("waypoint_arena_half_m", 20.0)
+        # Exploration mode: continuously sample new goals instead of terminating
+        self.exploration_mode = env_cfg.get("exploration_mode", False)
 
         # Pluggable reward — select function based on mode
         if self.goal_navigation:
@@ -211,6 +213,13 @@ class AirSimDroneEnv(gym.Env):
 
         return waypoints
 
+    def _sample_one_waypoint(self) -> tuple[float, float]:
+        """Sample a single random waypoint (no inter-waypoint spacing constraint)."""
+        half = self.waypoint_arena_half
+        x = float(self.np_random.uniform(-half, half))
+        y = float(self.np_random.uniform(-half, half))
+        return (x, y)
+
     def _get_goal_obs(self) -> np.ndarray:
         """Compute goal-relative observation [cos_theta, sin_theta, dist_norm].
 
@@ -363,6 +372,9 @@ class AirSimDroneEnv(gym.Env):
 
         if self.goal_navigation:
             goal_reached = self._check_goal_reached()
+            # Exploration mode: immediately queue a new random goal so the drone never stops
+            if self.exploration_mode and goal_reached:
+                self._waypoint_queue.append(self._sample_one_waypoint())
             all_goals_done = (len(self._waypoint_queue) == 0)
             # dist_norm and cos_theta are in obs["velocity"][5] and [3]
             dist_norm = float(obs["velocity"][5]) if not all_goals_done else 0.0

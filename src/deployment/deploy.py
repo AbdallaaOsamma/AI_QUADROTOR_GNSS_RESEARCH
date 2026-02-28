@@ -46,8 +46,8 @@ def _get_center_roi_min_depth(raw_env: AirSimDroneEnv) -> float:
     if center_roi.size == 0:
         return float("inf")
 
-    # Depth is normalized [0, 1] — convert back to meters
-    min_normalized = float(np.min(center_roi))
+    # Use 5th-percentile instead of min to discard bad pixels (drone body artifacts)
+    min_normalized = float(np.percentile(center_roi, 5))
     return min_normalized * raw_env.depth_clip_m
 
 
@@ -77,6 +77,11 @@ def main():
         "--speed_scale", type=float, default=1.0,
         help="Multiply max_vx / max_vy / max_yaw_rate by this factor at deploy time. "
              "1.0 = training speed. 2.0 = double speed. Does not require retraining.",
+    )
+    parser.add_argument(
+        "--forward_only", action="store_true",
+        help="Clip vx >= 0: forces drone to turn (yaw) toward goals rather than fly backwards. "
+             "Use for exploration mode to get natural forward-flight behavior.",
     )
     args = parser.parse_args()
 
@@ -132,6 +137,10 @@ def main():
     try:
         while step < max_steps:
             action, _ = model.predict(obs, deterministic=True)
+
+            # Forward-only mode: disallow backward flight so drone turns to face goals
+            if args.forward_only:
+                action[0][0] = max(0.0, float(action[0][0]))
 
             # Safety filter on the raw action before env.step processes it
             if safety is not None:

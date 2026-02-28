@@ -1,0 +1,26 @@
+env:
+  ip: ""
+  image_shape: [84, 84, 1]
+  target_alt: 3.0
+  max_vx: 3.0
+  max_vy: 1.0
+  max_yaw_rate_deg: 60
+  dt: 0.1
+  max_steps: 999999
+  goal_navigation: true
+  exploration_mode: true
+  num_waypoints: 1
+  goal_radius_m: 3.0
+  max_goal_dist_m: 30.0
+  waypoint_arena_half_m: 20.0
+
+reward:
+  w_heading: 0.5
+  w_progress: 0.3
+  w_dist: 0.3
+  w_goal: 10.0
+  w_mission: 50.0
+  w_collision: -100.0
+  w_smoothness: -0.1
+
+frame_stack: 4

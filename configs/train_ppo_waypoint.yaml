@@ -20,8 +20,9 @@ env:
   waypoint_arena_half_m: 20.0
 
 reward:
-  w_heading: 0.3               # cos(bearing_to_goal) — continuous 360° gradient
-  w_dist: 0.5                  # delta-based distance shaping — penalises hovering
+  w_heading: 0.5               # cos(bearing_to_goal) — continuous 360° gradient
+  w_progress: 0.3              # forward flight bonus — zero for backward flight
+  w_dist: 0.3                  # delta-based distance shaping — penalises hovering
   w_goal: 10.0                 # per-waypoint arrival bonus
   w_mission: 50.0              # all-waypoints completion bonus (half a collision penalty)
   w_collision: -100.0          # terminal collision penalty
