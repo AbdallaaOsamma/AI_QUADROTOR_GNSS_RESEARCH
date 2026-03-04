@@ -9,7 +9,60 @@ Usage:
 import argparse
 import copy
 import os
+import socket
+import time
 from datetime import datetime
+
+# Default AirSim shortcut — auto-launched if AirSim is not already running.
+_DEFAULT_AIRSIM_PATH = (
+    r"C:\Users\bedor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\AirSimNH.lnk"
+)
+_AIRSIM_STARTUP_TIMEOUT_S = 90
+
+
+def _is_port_open(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if something is listening on host:port."""
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def launch_airsim_if_needed(port: int, shortcut_path: str) -> None:
+    """Launch AirSim via Windows shortcut if not already running, then wait."""
+    if _is_port_open(port):
+        print(f"[airsim] Already running on port {port}.", flush=True)
+        return
+
+    if not shortcut_path:
+        raise RuntimeError(
+            f"AirSim is not running on port {port} and no --airsim_path was given. "
+            "Start AirSim manually or pass --airsim_path <path>."
+        )
+
+    print(f"[airsim] Not detected on port {port} — launching AirSimNH...", flush=True)
+    print(f"[airsim] Shortcut: {shortcut_path}", flush=True)
+    os.startfile(shortcut_path)  # Windows shell open — same as double-clicking the .lnk
+
+    print(f"[airsim] Waiting up to {_AIRSIM_STARTUP_TIMEOUT_S}s for AirSim to be ready...", flush=True)
+    t0 = time.time()
+    deadline = t0 + _AIRSIM_STARTUP_TIMEOUT_S
+    while time.time() < deadline:
+        if _is_port_open(port):
+            print(f"[airsim] Port {port} open — giving AirSim 5s to settle...", flush=True)
+            time.sleep(5.0)
+            print("[airsim] AirSim is ready.", flush=True)
+            return
+        elapsed = int(time.time() - t0)
+        print(f"[airsim] Waiting... ({elapsed}s)", flush=True)
+        time.sleep(3.0)
+
+    raise TimeoutError(
+        f"AirSim did not open port {port} within {_AIRSIM_STARTUP_TIMEOUT_S}s. "
+        "Try starting AirSim manually before running training."
+    )
+
 
 import yaml
 from stable_baselines3 import PPO
@@ -95,7 +148,15 @@ def main():
         "--base_port", type=int, default=41451,
         help="Base API port for AirSim instances (env i uses base_port + i)",
     )
+    parser.add_argument(
+        "--airsim_path", type=str, default=_DEFAULT_AIRSIM_PATH,
+        help="Path to AirSimNH shortcut or .exe — auto-launched if AirSim is not running.",
+    )
     args = parser.parse_args()
+
+    # --- Auto-launch AirSim if not running ---
+    print("[train_ppo] Starting...", flush=True)
+    launch_airsim_if_needed(port=args.base_port, shortcut_path=args.airsim_path)
 
     with open(args.config, "r") as f:
         cfg = yaml.safe_load(f)
@@ -128,13 +189,19 @@ def main():
     num_envs = args.num_envs
     base_port = args.base_port
 
+    print(f"[train_ppo] Creating training environment (port {base_port})...", flush=True)
     train_env = make_vec_env(cfg, num_envs=num_envs, base_port=base_port)
     train_env = VecFrameStack(train_env, n_stack=frame_stack, channels_order="last")
+    print("[train_ppo] Training environment ready.", flush=True)
 
-    # Eval env gets a dedicated port after all train envs
-    eval_port = base_port + num_envs
+    # Eval env: share the first AirSim instance (base_port) so a single
+    # AirSim launch works for both training and periodic evaluation.
+    # When num_envs > 1, use a dedicated instance after all train envs.
+    eval_port = base_port if num_envs == 1 else base_port + num_envs
+    print(f"[train_ppo] Creating eval environment (port {eval_port})...", flush=True)
     eval_env = make_vec_env(cfg, num_envs=1, base_port=eval_port)
     eval_env = VecFrameStack(eval_env, n_stack=frame_stack, channels_order="last")
+    print("[train_ppo] Eval environment ready.", flush=True)
 
     # --- Callbacks ---
     checkpoint_cb = CheckpointCallback(
