@@ -24,6 +24,42 @@ from gymnasium import spaces
 from src.environments.rewards import RewardFunction, WaypointRewardFunction
 
 
+class SimulatedVIO:
+    """Dead-reckoning VIO estimator that accumulates realistic drift.
+
+    Simulates GNSS-denied state estimation: velocity estimates drift from
+    ground truth over time via Gaussian noise, plus a constant per-episode
+    bias injection (simulating IMU bias / calibration error).
+
+    Args:
+        drift_std_per_step: Gaussian sigma added to each velocity component per step.
+        bias_std: sigma for per-episode constant bias (m/s per axis).
+        rng: numpy random generator.
+    """
+
+    def __init__(self, drift_std_per_step: float, bias_std: float, rng: np.random.Generator):
+        self._drift_std = drift_std_per_step
+        self._bias_std = bias_std
+        self._rng = rng
+        self._bias = np.zeros(3, dtype=np.float32)
+        self._accumulated_drift = np.zeros(3, dtype=np.float32)
+
+    def reset(self, rng: np.random.Generator) -> None:
+        """Re-sample per-episode bias and clear accumulated drift."""
+        self._rng = rng
+        self._bias = (
+            self._rng.normal(0, self._bias_std, 3).astype(np.float32)
+            if self._bias_std > 0 else np.zeros(3, dtype=np.float32)
+        )
+        self._accumulated_drift = np.zeros(3, dtype=np.float32)
+
+    def update(self, gt_velocity: np.ndarray) -> np.ndarray:
+        """Return VIO-estimated velocity given ground-truth velocity."""
+        if self._drift_std > 0:
+            self._accumulated_drift += self._rng.normal(0, self._drift_std, 3).astype(np.float32)
+        return gt_velocity + self._accumulated_drift + self._bias
+
+
 class AirSimDroneEnv(gym.Env):
 
     metadata = {"render_modes": ["human"]}
@@ -36,6 +72,8 @@ class AirSimDroneEnv(gym.Env):
         env_cfg = cfg.get("env", {})
         reward_cfg = cfg.get("reward", {})
         self._dr_cfg = cfg.get("domain_randomization", {})
+        self._vio_enabled = self._dr_cfg.get("vio_enabled", False)
+        self._vio: SimulatedVIO | None = None
 
         self.ip = env_cfg.get("ip", "")
         self.port = env_cfg.get("port", 41451)
@@ -144,6 +182,13 @@ class AirSimDroneEnv(gym.Env):
                 ignore_collision=True,
             )
 
+        if self._vio_enabled:
+            drift_std = self._dr_cfg.get("vio_drift_std_per_step", 0.01)
+            bias_std = self._dr_cfg.get("vio_bias_std", 0.005)
+            if self._vio is None:
+                self._vio = SimulatedVIO(drift_std, bias_std, self.np_random)
+            self._vio.reset(self.np_random)
+
     # ------------------------------------------------------------------
     # Observation
     # ------------------------------------------------------------------
@@ -183,11 +228,15 @@ class AirSimDroneEnv(gym.Env):
         R_yaw = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
         v_body = R_yaw @ v_global
 
-        return np.array([
+        gt_vel = np.array([
             v_body[0],
             v_body[1],
             kin.angular_velocity.z_val,
         ], dtype=np.float32)
+
+        if self._vio_enabled and self._vio is not None:
+            return self._vio.update(gt_vel)
+        return gt_vel
 
     def _sample_waypoints(self) -> list[tuple[float, float]]:
         """Sample num_waypoints positions with minimum spacing constraint.

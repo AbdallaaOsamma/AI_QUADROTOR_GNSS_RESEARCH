@@ -25,6 +25,9 @@ domain_randomization:
   enabled: true
   depth_noise_std: 0.02       # ~5% Gaussian noise on normalized depth
   spawn_radius_m: 5.0         # Random spawn within 5m of origin
+  vio_enabled: true
+  vio_drift_std_per_step: 0.01
+  vio_bias_std: 0.005
 
 ppo:
   learning_rate: 3.0e-4
