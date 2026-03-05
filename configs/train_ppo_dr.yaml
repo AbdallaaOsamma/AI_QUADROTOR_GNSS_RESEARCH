@@ -1,5 +1,9 @@
 # PPO training with domain randomization enabled
-# Depth noise + spawn position randomization for generalization
+# Current DR scope: depth sensor noise + spawn position/yaw jitter
+# Proposal also requires (not yet implemented):
+#   Physics:  mass, inertia, motor gain, and wind disturbance randomization
+#   Sensors:  IMU drift/bias injection, optical flow noise, simulated visual degradation
+# See CLAUDE.md Known Issue #7 for implementation notes.
 
 env:
   ip: ""

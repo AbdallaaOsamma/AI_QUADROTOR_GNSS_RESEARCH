@@ -1,12 +1,12 @@
-# GNSS-Denied Quadrotor Autonomy
+# AI-Augmented Flight Control for Quadrotor UAV
 
-**AI-Augmented Flight Control for UAV in GNSS-Denied Conditions**
+**Development of an AI-Augmented Flight Control System for a Quadrotor UAV using Reinforcement Learning in GNSS-Denied Environments**
 
-A depth-only PPO agent learns obstacle avoidance in AirSim, generalizing across environments via domain randomization and multi-environment training. Simulation-first architecture designed for later sim-to-real transfer.
+A depth-only PPO agent learns autonomous navigation and obstacle avoidance in GNSS-denied environments using AirSim, generalizing across environments via domain randomization and multi-environment training. GPS is explicitly disabled in simulation; the agent relies solely on depth camera and inertial sensing. Simulation-first architecture designed for sim-to-real transfer via ONNX export and MAVLink/ROS2 integration.
 
 **Student**: Abdalla Shoaeb (H00404752)
 **Institution**: Heriot-Watt University Dubai
-**Supervisor**: Dr. Mounis Shawgi
+**Supervisor**: Marah Saleh
 
 ## Quick Start
 
@@ -98,8 +98,8 @@ docs/                   FYP proposal, interim report, architecture
 
 ## Key Design Decisions
 
-1. **RL over Imitation Learning** — IL failed due to scripted expert ceiling; RL discovers policies from scratch
-2. **Depth-only observation** — Invariant to lighting/texture, directly addresses "anywhere in the world"
-3. **Lockstep simulation** — Deterministic training, no wall-clock bottleneck
-4. **Safety as separate module** — Always-on envelope independent of policy exploration
-5. **AirSim** — Existing pipeline, multiple environments, good depth simulation
+1. **RL over classical PID control** — PID requires manual tuning and is brittle under disturbances; RL learns optimal policies via trial-and-error, enabling autonomous navigation without prior mapping
+2. **Depth-only observation** — Primary sensor for GNSS-denied state estimation; explicitly excludes GPS/GNSS signals, invariant to lighting/texture, enabling robust sim-to-real transfer in GPS-denied environments (indoor, urban canyons, tunnels)
+3. **Lockstep simulation** — Deterministic training via `simContinueForTime(dt)`, no wall-clock bottleneck
+4. **Safety as separate module** — Always-on hard envelope independent of policy exploration
+5. **AirSim + Unreal Engine** — High-fidelity physics and sensor simulation; multiple environment support for domain randomization and generalization

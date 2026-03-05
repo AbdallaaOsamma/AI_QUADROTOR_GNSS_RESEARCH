@@ -50,8 +50,8 @@ def launch_airsim_if_needed(port: int, shortcut_path: str) -> None:
     deadline = t0 + _AIRSIM_STARTUP_TIMEOUT_S
     while time.time() < deadline:
         if _is_port_open(port):
-            print(f"[airsim] Port {port} open — giving AirSim 5s to settle...", flush=True)
-            time.sleep(5.0)
+            print(f"[airsim] Port {port} open — giving AirSim 15s to settle...", flush=True)
+            time.sleep(15.0)
             print("[airsim] AirSim is ready.", flush=True)
             return
         elapsed = int(time.time() - t0)

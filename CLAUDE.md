@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project Overview
 
-**GNSS-Denied Quadrotor Autonomy via Reinforcement Learning**.
-A depth-only PPO agent learns obstacle avoidance in AirSim, generalizing across environments via domain randomization and multi-environment rotation. Simulation-first, designed for later sim-to-real transfer via ONNX export.
+**AI-Augmented Flight Control for Quadrotor UAV using Reinforcement Learning in GNSS-Denied Environments** (FYP — Heriot-Watt University Dubai).
+A Deep RL agent (PPO; SAC planned for comparison) learns autonomous navigation and obstacle avoidance in GNSS-denied environments (no GPS) in AirSim, generalizing across environments via domain randomization and multi-environment rotation. GPS is explicitly disabled in simulation; the agent relies on depth camera and inertial sensing only. Simulation-first, designed for sim-to-real transfer via ONNX export and MAVLink/ROS2 (Phase 3).
 
 **Current Phase**: Infrastructure complete (Weeks 1–4). Next phase is running training campaigns and collecting ablation results for the FYP thesis.
 
@@ -109,12 +109,12 @@ docs/               FYP documents, architecture docs
 
 ### Observation Pipeline
 - **Depth**: Forward camera (84x84), clipped at 20m, normalized [0,1], 4-frame stack via `VecFrameStack`
-- **Velocity**: Body-frame [vx, vy, yaw_rate] rotated from AirSim global kinematics using yaw matrix
+- **Velocity**: Body-frame [vx, vy, yaw_rate] rotated from AirSim global kinematics using yaw matrix. **Note**: this uses AirSim's perfect physics state as a proxy — the proposal requires VIO-estimated (no GPS) velocity from an onboard pipeline (see Known Issue #10).
 - **Space**: `Dict{"image": Box(0,1, (84,84,4)), "velocity": Box(-inf,inf, (3,))}`
-- **Domain Randomization**: Optional Gaussian depth noise (5%) + spawn position/yaw jitter (5m radius)
+- **Domain Randomization**: Optional Gaussian depth noise (5%) + spawn position/yaw jitter (5m radius). Proposal also requires physics DR (mass, inertia, motor gains, wind disturbances) — not yet implemented; AirSim weather API can provide wind, but physics param DR requires per-episode AirSim settings patching.
 
 ### Policy
-- **Algorithm**: PPO (stable-baselines3) with `MultiInputPolicy`
+- **Algorithm**: PPO (stable-baselines3) with `MultiInputPolicy` — SAC (off-policy, maximum-entropy) is the second algorithm planned for implementation and comparative evaluation per the proposal
 - **Feature extraction**: NatureCNN for image branch, MLP for velocity branch, late fusion
 - **Action**: Continuous `[-1,1]^3` → `[vx, vy, yaw_rate]` scaled to `[3.0 m/s, 1.0 m/s, 45°/s]`
 
@@ -156,3 +156,19 @@ docs/               FYP documents, architecture docs
 3. **`configs/curriculum/` is empty**: True curriculum learning (progressively harder environments) is not yet implemented. Round-robin rotation via `EnvironmentScheduler` is the current substitute.
 
 4. **`src/eval/` directory**: Appears to be an abandoned duplicate of `src/evaluation/`. Should be cleaned up.
+
+5. **SAC algorithm not yet implemented**: The proposal specifies both PPO and SAC for comparative evaluation. Only PPO is currently implemented. SAC (`stable_baselines3.SAC`) needs a `configs/train_sac.yaml` and a parallel training entrypoint.
+
+6. **Optuna hyperparameter sweeps not integrated**: The proposal requires Optuna-driven hyperparameter sweeps. Currently, reward weight sweeps are run manually via `scripts/run_reward_sweep.py`. A `scripts/run_hyperparameter_sweep.py` using `optuna` is required.
+
+7. **Physics and sensor domain randomization incomplete**: Current DR covers depth sensor noise and spawn jitter only. Proposal requires varying mass, inertia, motor gains, wind disturbances, IMU drift/bias, optical flow noise, and simulated visual degradation. Physics param DR requires per-episode AirSim settings-file patching or the AirSim weather API (for wind); IMU/optical-flow noise requires injecting drift into `_get_body_velocity()` and adding a synthetic optical flow branch.
+
+8. **Hardware prototype not started (Phase 3)**: Proposal Phase 3 requires a physical quadrotor (250–330mm frame, Pixhawk 6C, Jetson Nano, RealSense D435i) and a MAVLink/ROS2 bridge between the RL inference module and the flight controller. Only ONNX export exists currently.
+
+9. **Statistical analysis not implemented**: Proposal requires ANOVA and paired t-tests across RL vs PID and PPO vs SAC results. No statistical analysis is in `scripts/` yet.
+
+10. **VIO/optical-flow state estimation pipeline missing**: The proposal's central GNSS-denied premise requires that position and velocity be estimated from a VIO pipeline (e.g. VINS-Mono or ORB-SLAM3) fusing IMU and depth/optical-flow data — with no GPS data in the observation space. Currently `_get_body_velocity()` reads AirSim's perfect ground-truth kinematics, which is equivalent to GPS-aided navigation. A proper implementation requires: (a) a simulated VIO or optical-flow estimator with realistic drift, (b) replacing the velocity observation with VIO-estimated values, and (c) adding a PX4Flow-equivalent optical flow channel. This is the most significant implementation gap relative to the proposal.
+
+11. **`localisation_drift` metric not implemented**: The proposal specifies five evaluation metrics including "localisation drift (metres)" — the accumulation of VIO position estimation error relative to ground truth. This metric is absent from `src/evaluation/metrics.py`. A stub exists but requires VIO position estimates to compute. Implement once the VIO pipeline (Known Issue #10) is in place.
+
+12. **Estimation drift divergence penalty absent from reward**: The proposal states the reward function should "penalise collisions, estimation drift divergence, and deviation from target trajectories". The current reward penalises collisions, action jerk (smoothness), and lack of forward progress, but includes no estimation drift divergence term. This requires VIO error feedback from Known Issue #10 before it can be implemented.

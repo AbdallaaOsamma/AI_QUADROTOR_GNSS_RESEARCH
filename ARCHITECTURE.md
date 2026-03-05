@@ -1,7 +1,8 @@
-# GNSS-Denied Quadrotor Autonomy: Architecture & Implementation Plan
+# AI-Augmented Flight Control for Quadrotor UAV: Architecture & Implementation Plan
 
-**Project**: AI-Augmented Flight Control for UAV in GNSS-Denied Conditions
+**Project**: Development of an AI-Augmented Flight Control System for a Quadrotor UAV using Reinforcement Learning in GNSS-Denied Environments
 **Student**: Abdalla Shoaeb (H00404752), Heriot-Watt University Dubai
+**Supervisor**: Marah Saleh
 **Date**: 2026-02-14
 **Revision**: 1.0
 

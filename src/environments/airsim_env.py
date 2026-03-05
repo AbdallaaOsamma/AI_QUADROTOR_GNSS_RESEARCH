@@ -294,29 +294,25 @@ class AirSimDroneEnv(gym.Env):
         # Unpause sim — step() leaves it paused for lockstep,
         # and blocking calls (takeoff, moveToZ) hang on a paused sim.
         self.client.simPause(False)
+        self.client.reset()
+        self.client.simPause(False)  # reset() re-pauses internally; force unpause
+        time.sleep(0.3)
 
-        for attempt in range(self.MAX_RESET_RETRIES):
-            self.client.reset()
-            time.sleep(0.5)  # let physics settle after reset
-            self.client.enableApiControl(True)
-            self.client.armDisarm(True)
-            self.client.takeoffAsync().join()
-            self.client.moveToZAsync(-self.target_alt, 1.0).join()
+        # Force clean spawn so we never start inside geometry
+        self.client.simSetVehiclePose(
+            airsim.Pose(
+                airsim.Vector3r(0, 0, -self.target_alt),
+                airsim.to_quaternion(0, 0, 0),
+            ),
+            ignore_collision=True,
+        )
+        self.client.enableApiControl(True)
+        self.client.armDisarm(True)
+        self.client.takeoffAsync().join()
+        self.client.moveToZAsync(-self.target_alt, 2.0).join()
 
-            if not self.client.simGetCollisionInfo().has_collided:
-                break
-
-            self.client.simSetVehiclePose(
-                airsim.Pose(
-                    airsim.Vector3r(0, 0, -self.target_alt),
-                    airsim.to_quaternion(0, 0, 0),
-                ),
-                ignore_collision=True,
-            )
-
-        # Record collision timestamp to distinguish stale flags from
-        # real in-episode collisions (AirSim doesn't reliably clear
-        # has_collided on reset).
+        # Record stale collision timestamp — step() uses delta to filter
+        # real in-episode collisions from pre-reset stale flags.
         self._last_col_ts = self.client.simGetCollisionInfo().time_stamp
 
         # Enter lockstep mode for deterministic training

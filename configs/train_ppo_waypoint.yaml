@@ -5,12 +5,12 @@
 env:
   ip: ""                       # AirSim IP (empty = localhost)
   image_shape: [84, 84, 1]    # Depth image dimensions (H, W, C)
-  target_alt: 3.0              # Altitude hold in meters (NED: sent as -3.0)
-  max_vx: 3.0                  # Max forward velocity (m/s)
-  max_vy: 1.0                  # Max lateral velocity (m/s)
-  max_yaw_rate_deg: 60         # Up from 45 — 360° turning needs faster yaw
+  target_alt: 1.5              # Altitude hold in meters (NED: sent as -1.5)
+  max_vx: 5.0                  # Max forward velocity (m/s) — full speed
+  max_vy: 2.0                  # Max lateral velocity (m/s)
+  max_yaw_rate_deg: 90         # Fast yaw for 360° turns
   dt: 0.1                      # Control loop period (10 Hz)
-  max_steps: 2048              # Longer — 3 waypoints at 30m each needs room
+  max_steps: 1024              # Shorter episodes → more resets → more diverse data
 
   # Goal navigation settings
   goal_navigation: true
@@ -30,8 +30,8 @@ reward:
 
 ppo:
   learning_rate: 3.0e-4
-  n_steps: 2048                # Steps per rollout
-  batch_size: 64
+  n_steps: 1024                # Shorter rollouts → faster iteration
+  batch_size: 128              # Larger batches to compensate for smaller rollout
   n_epochs: 10
   gamma: 0.995                 # Higher — mission bonus must reach 300+ steps back
   gae_lambda: 0.95

@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gnss-denied-quad"
+name = "ai-quadrotor-rl"
 version = "0.1.0"
-description = "GNSS-Denied Quadrotor Autonomy via Reinforcement Learning"
+description = "AI-Augmented Flight Control for Quadrotor UAV using Reinforcement Learning in GNSS-Denied Environments"
 requires-python = ">=3.11"
 dependencies = [
     "airsim==1.8.1",

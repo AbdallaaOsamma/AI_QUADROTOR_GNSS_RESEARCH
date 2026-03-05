@@ -87,6 +87,96 @@ def survival_time(trajectory: list[dict], dt: float = 0.1) -> float:
     return len(trajectory) * dt
 
 
+def time_to_goal(trajectory: list[dict], dt: float = 0.1, reached: bool = False) -> float | None:
+    """Time (seconds) to reach the goal waypoint, or None if not reached.
+
+    When goal navigation is active, this measures elapsed time from episode
+    start until the final waypoint is reached.  Episodes that end in collision
+    or timeout return None so that aggregation can distinguish succeeded runs.
+
+    Args:
+        trajectory: list of step dicts recorded during the episode
+        dt: control period in seconds
+        reached: True when the mission_success flag is set for this episode
+    """
+    if not reached:
+        return None
+    return round(len(trajectory) * dt, 2)
+
+
+def trajectory_rmse(
+    trajectory: list[dict],
+    goal_x: float,
+    goal_y: float,
+) -> float:
+    """Root Mean Square Error of positions from the ideal straight-line path to goal.
+
+    Computes the perpendicular distance of each recorded position from the
+    straight line drawn between the episode start position and the goal
+    waypoint, then returns the RMSE of those distances.  A lower value means
+    the drone flew a more direct path with less lateral deviation.
+
+    Args:
+        trajectory: list of position dicts with 'x' and 'y' keys
+        goal_x: x coordinate of the goal waypoint (metres, AirSim NED)
+        goal_y: y coordinate of the goal waypoint (metres, AirSim NED)
+    """
+    if len(trajectory) < 2:
+        return 0.0
+
+    start_x = trajectory[0]["x"]
+    start_y = trajectory[0]["y"]
+
+    dx = goal_x - start_x
+    dy = goal_y - start_y
+    path_length = math.sqrt(dx ** 2 + dy ** 2)
+
+    if path_length < 1e-6:
+        return 0.0
+
+    # Unit vector along the ideal path
+    ux, uy = dx / path_length, dy / path_length
+
+    # Perpendicular distance from each position to the ideal line
+    errors_sq = []
+    for row in trajectory:
+        px = row["x"] - start_x
+        py = row["y"] - start_y
+        perp = abs(px * uy - py * ux)  # cross-product magnitude
+        errors_sq.append(perp ** 2)
+
+    return round(float(math.sqrt(np.mean(errors_sq))), 3)
+
+
+def localisation_drift(trajectory: list[dict]) -> float:
+    """Mean absolute localisation drift (metres) relative to ground truth.
+
+    Measures the GNSS-denied state estimation error: the average L2 distance
+    between VIO-estimated position (from optical flow / inertial odometry) and
+    AirSim ground-truth position at each step.
+
+    Args:
+        trajectory: list of step dicts with 'x_gt', 'y_gt' (AirSim ground truth)
+                    and 'x_est', 'y_est' (VIO-estimated position) keys.
+
+    Returns:
+        Mean positional error in metres.  Returns 0.0 if estimation data is
+        absent (e.g. when running on AirSim ground-truth kinematics directly).
+
+    Note:
+        This metric requires a VIO pipeline to produce 'x_est'/'y_est' values.
+        Until Known Issue #10 (VIO pipeline) is implemented, trajectory dicts
+        will not contain estimation data and this function will return 0.0.
+    """
+    errors = []
+    for row in trajectory:
+        if "x_est" in row and "y_est" in row and "x_gt" in row and "y_gt" in row:
+            dx = row["x_est"] - row["x_gt"]
+            dy = row["y_est"] - row["y_gt"]
+            errors.append(math.sqrt(dx ** 2 + dy ** 2))
+    return round(float(np.mean(errors)), 3) if errors else 0.0
+
+
 def goal_completion_rate(episodes: list[dict]) -> float:
     """Fraction of waypoints reached across all episodes.
 
@@ -109,11 +199,23 @@ def compute_episode_summary(
     goals_reached_count: int = 0,
     total_goals_count: int = 0,
     mission_success_flag: bool = False,
+    goal_x: float | None = None,
+    goal_y: float | None = None,
 ) -> dict:
     """Compute all metrics for a single episode.
 
     Backward-compatible: existing callers without waypoint args are unaffected.
     Returns a dict suitable for JSON serialization.
+
+    Args:
+        trajectory: list of step dicts with at least 'x', 'y', 'reward' keys
+        dt: control period in seconds
+        collided: whether the episode ended in a collision
+        goals_reached_count: number of waypoints reached this episode
+        total_goals_count: total waypoints spawned this episode
+        mission_success_flag: True when all waypoints were reached
+        goal_x: x coordinate of the final goal waypoint (for trajectory RMSE)
+        goal_y: y coordinate of the final goal waypoint (for trajectory RMSE)
     """
     summary = {
         "distance_before_collision_m": round(distance_before_collision(trajectory), 2),
@@ -128,4 +230,9 @@ def compute_episode_summary(
         summary["goals_reached_count"] = goals_reached_count
         summary["total_goals_count"] = total_goals_count
         summary["mission_success"] = mission_success_flag
+        # time_to_goal: seconds to complete all waypoints (None if not reached)
+        summary["time_to_goal_s"] = time_to_goal(trajectory, dt, mission_success_flag)
+        # trajectory_rmse: lateral deviation from ideal straight-line path
+        if goal_x is not None and goal_y is not None:
+            summary["trajectory_rmse_m"] = trajectory_rmse(trajectory, goal_x, goal_y)
     return summary
