@@ -28,6 +28,7 @@ domain_randomization:
   vio_enabled: true
   vio_drift_std_per_step: 0.01
   vio_bias_std: 0.005
+  flow_noise_std: 0.03
 
 ppo:
   learning_rate: 3.0e-4

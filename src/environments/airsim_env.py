@@ -74,6 +74,7 @@ class AirSimDroneEnv(gym.Env):
         self._dr_cfg = cfg.get("domain_randomization", {})
         self._vio_enabled = self._dr_cfg.get("vio_enabled", False)
         self._vio: SimulatedVIO | None = None
+        self._flow_noise_std = 0.0
 
         self.ip = env_cfg.get("ip", "")
         self.port = env_cfg.get("port", 41451)
@@ -168,6 +169,9 @@ class AirSimDroneEnv(gym.Env):
         # Depth noise: Gaussian noise injected per-step in _get_depth_image
         self._depth_noise_std = self._dr_cfg.get("depth_noise_std", 0.0)
 
+        # Optical flow noise: per-step Gaussian velocity perturbation
+        self._flow_noise_std = self._dr_cfg.get("flow_noise_std", 0.0)
+
         # Spawn position randomization
         spawn_radius = self._dr_cfg.get("spawn_radius_m", 0.0)
         if spawn_radius > 0:
@@ -233,6 +237,12 @@ class AirSimDroneEnv(gym.Env):
             v_body[1],
             kin.angular_velocity.z_val,
         ], dtype=np.float32)
+
+        # Optical flow noise: per-step sensor perturbation
+        if self._flow_noise_std > 0:
+            gt_vel = gt_vel + self.np_random.normal(
+                0, self._flow_noise_std, 3
+            ).astype(np.float32)
 
         if self._vio_enabled and self._vio is not None:
             return self._vio.update(gt_vel)

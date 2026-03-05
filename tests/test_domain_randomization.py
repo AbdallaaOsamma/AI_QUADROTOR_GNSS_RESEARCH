@@ -45,3 +45,20 @@ class TestDepthNoise:
         noisy = self._apply_noise(img, noise_std=0.02, rng=rng)
         diff = (noisy - img).mean()
         assert abs(diff) < 0.01  # Mean noise should be near zero
+
+
+def test_optical_flow_noise_changes_velocity():
+    """Non-zero optical flow noise should modify the velocity array."""
+    rng = np.random.default_rng(42)
+    gt_vel = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    noise_std = 0.05
+    noisy = gt_vel + rng.normal(0, noise_std, gt_vel.shape).astype(np.float32)
+    assert not np.array_equal(gt_vel, noisy)
+
+
+def test_optical_flow_noise_zero_unchanged():
+    """Zero optical flow noise should leave velocity unchanged."""
+    rng = np.random.default_rng(42)
+    gt_vel = np.array([1.0, 0.5, -0.1], dtype=np.float32)
+    noisy = gt_vel + rng.normal(0, 0.0, gt_vel.shape).astype(np.float32)
+    np.testing.assert_array_equal(gt_vel, noisy)
