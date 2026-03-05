@@ -14,6 +14,7 @@ Usage:
     python scripts/run_ablations.py --timesteps 1000000 --skip abl3_frame_stack_1
 """
 import argparse
+import json
 import subprocess
 import sys
 
@@ -98,7 +99,6 @@ def build_command(exp: dict, total_timesteps: int) -> list:
     # train.py accepts --overrides as a JSON string and deep-merges it into
     # the loaded YAML config (highest priority, applied before --reward_config).
     if exp.get("overrides"):
-        import json
         overrides_json = json.dumps(exp["overrides"])
         cmd.extend(["--overrides", overrides_json])
 

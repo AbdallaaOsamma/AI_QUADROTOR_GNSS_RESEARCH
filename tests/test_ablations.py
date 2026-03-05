@@ -46,7 +46,6 @@ def test_ablation_build_command_overrides_structure():
     """build_command() must pass --overrides as a single valid-JSON argument."""
     # Import the helper directly to unit-test without subprocess.
     import importlib
-    import sys as _sys
 
     # Ensure the scripts package is importable.
     spec = importlib.util.find_spec("scripts.run_ablations")
