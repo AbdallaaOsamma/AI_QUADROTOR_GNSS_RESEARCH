@@ -75,6 +75,7 @@ class AirSimDroneEnv(gym.Env):
         self._vio_enabled = self._dr_cfg.get("vio_enabled", False)
         self._vio: SimulatedVIO | None = None
         self._flow_noise_std = 0.0
+        self._vio_pos_est = np.zeros(2, dtype=np.float32)  # [x_est, y_est] integrated from VIO vel
 
         self.ip = env_cfg.get("ip", "")
         self.port = env_cfg.get("port", 41451)
@@ -380,6 +381,7 @@ class AirSimDroneEnv(gym.Env):
         self._apply_domain_randomization()
         self.prev_action = np.zeros(3, dtype=np.float32)
         self.step_count = 0
+        self._vio_pos_est = np.zeros(2, dtype=np.float32)
 
         if self.goal_navigation:
             self._waypoint_queue = self._sample_waypoints()
@@ -416,6 +418,11 @@ class AirSimDroneEnv(gym.Env):
 
         obs = self._get_obs()
         self.step_count += 1
+
+        # Integrate VIO velocity to track estimated position (dead-reckoning)
+        if self._vio_enabled:
+            vio_vel_xy = obs["velocity"][:2]  # vx, vy body frame
+            self._vio_pos_est = self._vio_pos_est + vio_vel_xy * self.dt
 
         # Collision detection
         vx_body = obs["velocity"][0]
@@ -456,11 +463,18 @@ class AirSimDroneEnv(gym.Env):
         terminated = has_collided or (self.goal_navigation and all_goals_done)
         truncated = self.step_count >= self.max_steps
 
+        # Ground-truth and VIO-estimated position for localisation_drift metric
+        kin_for_info = self.client.getMultirotorState().kinematics_estimated
         info = {
             **reward_info,
             "vx_body": vx_body,
             "step_count": self.step_count,
+            "x_gt": float(kin_for_info.position.x_val),
+            "y_gt": float(kin_for_info.position.y_val),
         }
+        if self._vio_enabled:
+            info["x_est"] = float(self._vio_pos_est[0])
+            info["y_est"] = float(self._vio_pos_est[1])
 
         if self.goal_navigation:
             info.update({

@@ -9,6 +9,7 @@ from src.evaluation.metrics import (
     collision_rate,
     compute_episode_summary,
     distance_before_collision,
+    localisation_drift,
     path_smoothness,
     survival_time,
 )
@@ -83,6 +84,26 @@ class TestSurvivalTime:
     def test_basic(self):
         traj = _make_trajectory(100)
         assert survival_time(traj, dt=0.1) == pytest.approx(10.0)
+
+
+class TestLocalisationDrift:
+    def test_localisation_drift_nonzero_when_data_present(self):
+        """localisation_drift returns nonzero when est != gt."""
+        trajectory = [
+            {"x_gt": 0.0, "y_gt": 0.0, "x_est": 0.1, "y_est": 0.05},
+            {"x_gt": 1.0, "y_gt": 0.0, "x_est": 1.2, "y_est": 0.1},
+            {"x_gt": 2.0, "y_gt": 0.0, "x_est": 2.5, "y_est": 0.2},
+        ]
+        result = localisation_drift(trajectory)
+        assert result > 0.0
+
+    def test_localisation_drift_zero_when_perfect(self):
+        """localisation_drift returns 0 when est == gt."""
+        trajectory = [
+            {"x_gt": 0.0, "y_gt": 0.0, "x_est": 0.0, "y_est": 0.0},
+            {"x_gt": 1.0, "y_gt": 0.5, "x_est": 1.0, "y_est": 0.5},
+        ]
+        assert localisation_drift(trajectory) == 0.0
 
 
 class TestEpisodeSummary:

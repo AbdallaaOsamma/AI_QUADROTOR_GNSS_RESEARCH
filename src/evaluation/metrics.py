@@ -222,6 +222,7 @@ def compute_episode_summary(
         "average_speed_ms": round(average_speed(trajectory, dt), 3),
         "path_smoothness_jerk": round(path_smoothness(trajectory, dt), 3),
         "survival_time_s": round(survival_time(trajectory, dt), 2),
+        "localisation_drift_mean_m": localisation_drift(trajectory),
         "collided": collided,
         "total_steps": len(trajectory),
     }
