@@ -17,6 +17,7 @@ import argparse
 import glob
 import json
 import os
+import warnings
 
 import numpy as np
 from scipy.stats import f_oneway, ttest_rel
@@ -72,6 +73,13 @@ def extract_metric(summaries: list[dict], metric: str) -> np.ndarray:
         1-D float array of non-None values.
     """
     values = [s[metric] for s in summaries if s.get(metric) is not None]
+    n_dropped = len(summaries) - len(values)
+    if n_dropped > 0:
+        warnings.warn(
+            f"extract_metric('{metric}'): dropped {n_dropped}/{len(summaries)} "
+            f"summaries with missing or None values",
+            stacklevel=2,
+        )
     return np.array(values, dtype=float)
 
 
@@ -89,6 +97,16 @@ def run_anova(*groups: np.ndarray) -> dict:
         ``{"f_statistic": float, "p_value": float, "n_groups": int,
            "group_sizes": list[int], "group_means": list[float]}``
     """
+    for i, g in enumerate(groups):
+        if len(g) < 2:
+            return {
+                "f_statistic": None,
+                "p_value": None,
+                "error": "insufficient_samples",
+                "n_groups": len(groups),
+                "group_sizes": [int(len(g)) for g in groups],
+                "group_means": [float(np.mean(g)) if len(g) > 0 else None for g in groups],
+            }
     f_stat, p_val = f_oneway(*groups)
     return {
         "f_statistic": float(f_stat),
@@ -113,6 +131,15 @@ def run_paired_ttest(a: np.ndarray, b: np.ndarray) -> dict:
         ``{"statistic": float, "p_value": float, "significant_at_0.05": bool,
            "mean_a": float, "mean_b": float, "mean_diff": float}``
     """
+    if len(a) != len(b):
+        n = min(len(a), len(b))
+        warnings.warn(
+            f"run_paired_ttest: arrays have unequal lengths ({len(a)} vs {len(b)}), "
+            f"truncating to {n} pairs. Pairing validity may be compromised.",
+            stacklevel=2,
+        )
+        a = a[:n]
+        b = b[:n]
     stat, p_val = ttest_rel(a, b)
     return {
         "statistic": float(stat),
@@ -228,8 +255,11 @@ def main() -> None:
         if n < 2:
             print(f"  [SKIP] ({name_a}, {name_b}) — fewer than 2 paired observations.")
             continue
+        if len(a) != len(b):
+            print(f"  [WARN] ({name_a}, {name_b}) — unequal sample sizes "
+                  f"({len(a)} vs {len(b)}), truncating to {n} pairs.")
         ttest_result = run_paired_ttest(a[:n], b[:n])
-        ttest_result["pair"] = (name_a, name_b)
+        ttest_result["pair"] = f"{name_a}_vs_{name_b}"
         ttest_result["n_pairs"] = n
         results["paired_ttests"].append(ttest_result)
         sig = "**SIGNIFICANT**" if ttest_result["significant_at_0.05"] else "not significant"
