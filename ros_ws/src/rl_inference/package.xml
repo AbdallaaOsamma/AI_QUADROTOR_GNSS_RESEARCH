@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rl_inference</name>
+  <version>0.1.0</version>
+  <description>RL policy inference node for QDrone 2 deployment</description>
+  <maintainer email="h00404752@hw.ac.uk">Abdalla Shoaeb</maintainer>
+  <license>MIT</license>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>cv_bridge</depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

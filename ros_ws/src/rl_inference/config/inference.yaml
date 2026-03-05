@@ -1,0 +1,6 @@
+/rl_inference:
+  ros__parameters:
+    model_path: "/home/ubuntu/models/best_model.onnx"
+    max_vx: 3.0
+    max_vy: 1.0
+    max_yaw_rate_deg: 45.0
