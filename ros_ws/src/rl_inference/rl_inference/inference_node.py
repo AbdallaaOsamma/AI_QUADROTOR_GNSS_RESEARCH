@@ -129,9 +129,14 @@ class InferenceNode:
 
     def _inference_step(self):
         """Run ONNX inference and publish velocity command at 10 Hz."""
+        # Stack frames → (1, 84, 84, 4) NHWC.
+        # Verify against ONNX input metadata before first flight:
+        #   python -c "import onnxruntime as ort; s=ort.InferenceSession('model.onnx'); print(s.get_inputs()[0].shape)"
+        # If the exported model expects NCHW (1,4,84,84), add:
+        #   image = np.transpose(image, (0, 3, 1, 2))
         image = np.concatenate(list(self._frame_buffer), axis=-1)[
             np.newaxis
-        ]  # (1, 84, 84, 4)
+        ]  # (1, 84, 84, 4) NHWC — see note above
         velocity = self._latest_velocity[np.newaxis]  # (1, 3)
 
         action = self.session.run(
