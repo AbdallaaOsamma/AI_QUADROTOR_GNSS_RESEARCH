@@ -94,11 +94,10 @@ def build_command(exp: dict, total_timesteps: int) -> list:
     if exp.get("reward_config"):
         cmd.extend(["--reward_config", exp["reward_config"]])
 
-    # Add CLI overrides for dynamic parameters (frame_stack, DR settings)
-    # Note: This assumes the training script supports --override or similar
-    # For now, we document this as a future enhancement
+    # Add CLI overrides for dynamic parameters (frame_stack, DR settings).
+    # train.py accepts --overrides as a JSON string and deep-merges it into
+    # the loaded YAML config (highest priority, applied before --reward_config).
     if exp.get("overrides"):
-        # Placeholder: future enhancement for CLI parameter overrides
         import json
         overrides_json = json.dumps(exp["overrides"])
         cmd.extend(["--overrides", overrides_json])
@@ -167,9 +166,15 @@ Examples:
     experiments = ABLATIONS
 
     if args.only:
-        experiments = [exp for exp in ABLATIONS if exp["name"] in args.only]
+        # Support both full names ("abl1_no_smoothness") and shorthand suffixes
+        # ("no_smoothness") so the documented usage examples work correctly.
+        def _matches_any(name: str, patterns: list) -> bool:
+            return any(name == p or name.endswith(f"_{p}") for p in patterns)
+
+        experiments = [exp for exp in ABLATIONS if _matches_any(exp["name"], args.only)]
         if not experiments:
             print(f"[ERROR] No experiments matched --only {args.only}")
+            print(f"  Available names: {[e['name'] for e in ABLATIONS]}")
             sys.exit(1)
     else:
         experiments = [exp for exp in ABLATIONS if exp["name"] not in args.skip]
