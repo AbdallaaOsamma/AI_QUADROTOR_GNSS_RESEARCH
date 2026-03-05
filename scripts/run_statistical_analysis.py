@@ -230,10 +230,13 @@ def main() -> None:
     if len(groups) >= 2:
         anova_result = run_anova(*groups.values())
         results["anova"] = anova_result
-        print(f"  F={anova_result['f_statistic']:.4f}  "
-              f"p={anova_result['p_value']:.4e}  "
-              f"groups={anova_result['n_groups']}")
-        if anova_result["p_value"] < 0.05:
+        if anova_result.get("error"):
+            print(f"  [SKIP] ANOVA error: {anova_result['error']}")
+        else:
+            print(f"  F={anova_result['f_statistic']:.4f}  "
+                  f"p={anova_result['p_value']:.4e}  "
+                  f"groups={anova_result['n_groups']}")
+        if anova_result.get("p_value") is not None and anova_result["p_value"] < 0.05:
             print("  ** Significant difference detected (p < 0.05) **")
         else:
             print("  No significant difference (p >= 0.05)")
