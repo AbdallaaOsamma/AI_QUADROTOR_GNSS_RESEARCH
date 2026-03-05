@@ -432,6 +432,19 @@ class AirSimDroneEnv(gym.Env):
             and col_info.time_stamp != self._last_col_ts
         )
 
+        # Ground-truth position for localisation_drift metric and drift reward.
+        # Fetched here (before reward calls) so the same RPC result is reused
+        # for both drift_error computation and the info dict.
+        kin_for_info = self.client.getMultirotorState().kinematics_estimated
+
+        # Drift error: L2 distance between VIO-estimated and ground-truth position
+        drift_error = 0.0
+        if self._vio_enabled:
+            drift_error = float(np.hypot(
+                self._vio_pos_est[0] - kin_for_info.position.x_val,
+                self._vio_pos_est[1] - kin_for_info.position.y_val,
+            ))
+
         if self.goal_navigation:
             goal_reached = self._check_goal_reached()
             # Exploration mode: immediately queue a new random goal so the drone never stops
@@ -455,7 +468,8 @@ class AirSimDroneEnv(gym.Env):
             goal_reached = False
             all_goals_done = False
             reward, reward_info = self.reward_fn(
-                vx_body, has_collided, action, self.prev_action
+                vx_body, has_collided, action, self.prev_action,
+                drift_error=drift_error,
             )
 
         self.prev_action = action.copy()
@@ -463,8 +477,6 @@ class AirSimDroneEnv(gym.Env):
         terminated = has_collided or (self.goal_navigation and all_goals_done)
         truncated = self.step_count >= self.max_steps
 
-        # Ground-truth and VIO-estimated position for localisation_drift metric
-        kin_for_info = self.client.getMultirotorState().kinematics_estimated
         info = {
             **reward_info,
             "vx_body": vx_body,

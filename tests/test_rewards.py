@@ -100,3 +100,28 @@ class TestRewardFunction:
         )
         expected = info["r_progress"] + info["r_collision"] + info["r_smoothness"]
         assert reward == pytest.approx(expected)
+
+
+def test_drift_penalty_nonzero_when_drift_present():
+    """Reward should include drift penalty when drift_error > 0 and w_drift != 0."""
+    rf = RewardFunction({"w_progress": 0.5, "w_collision": -100.0,
+                         "w_smoothness": -0.1, "w_drift": -0.5})
+    action = np.zeros(3, dtype=np.float32)
+    reward, info = rf(
+        vx_body=1.0, has_collided=False,
+        action=action, prev_action=action, drift_error=0.5
+    )
+    assert info.get("r_drift", 0.0) != 0.0
+    assert info["r_drift"] == pytest.approx(-0.25)  # -0.5 * 0.5
+
+
+def test_drift_penalty_zero_when_weight_zero():
+    """With w_drift=0, drift penalty is absent regardless of drift_error."""
+    rf = RewardFunction({"w_progress": 0.5, "w_collision": -100.0,
+                         "w_smoothness": -0.1, "w_drift": 0.0})
+    action = np.zeros(3, dtype=np.float32)
+    reward, info = rf(
+        vx_body=1.0, has_collided=False,
+        action=action, prev_action=action, drift_error=2.0
+    )
+    assert info.get("r_drift", 0.0) == 0.0

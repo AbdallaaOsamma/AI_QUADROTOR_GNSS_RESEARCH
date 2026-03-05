@@ -18,6 +18,7 @@ class RewardFunction:
         self.w_progress = cfg.get("w_progress", 0.5)
         self.w_collision = cfg.get("w_collision", -100.0)
         self.w_smoothness = cfg.get("w_smoothness", -0.1)
+        self.w_drift = cfg.get("w_drift", 0.0)
 
     def __call__(
         self,
@@ -25,18 +26,21 @@ class RewardFunction:
         has_collided: bool,
         action: np.ndarray,
         prev_action: np.ndarray,
+        drift_error: float = 0.0,
     ) -> tuple[float, dict]:
         """Return (total_reward, info_dict) for a single step."""
         r_progress = self.w_progress * vx_body
         r_collision = self.w_collision if has_collided else 0.0
         r_smoothness = self.w_smoothness * float(np.linalg.norm(action - prev_action))
+        r_drift = self.w_drift * drift_error
 
-        total = r_progress + r_collision + r_smoothness
+        total = r_progress + r_collision + r_smoothness + r_drift
 
         info = {
             "r_progress": r_progress,
             "r_collision": r_collision,
             "r_smoothness": r_smoothness,
+            "r_drift": r_drift,
         }
         return total, info
 

@@ -15,6 +15,7 @@ reward:
   w_progress: 0.5           # Weight for forward velocity reward
   w_collision: -100.0       # Penalty on collision (terminal)
   w_smoothness: -0.1        # Penalty for action jerk ||a_t - a_{t-1}||
+  w_drift: 0.0              # VIO drift divergence penalty (disabled; enable with DR config)
 
 ppo:
   learning_rate: 3.0e-4
