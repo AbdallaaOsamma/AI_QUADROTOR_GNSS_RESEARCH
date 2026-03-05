@@ -65,7 +65,7 @@ def launch_airsim_if_needed(port: int, shortcut_path: str) -> None:
 
 
 import yaml
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
@@ -114,8 +114,64 @@ def make_vec_env(cfg: dict, num_envs: int, base_port: int):
     return SubprocVecEnv(env_fns, start_method="spawn")
 
 
+def build_model(
+    algo: str,
+    env,
+    cfg: dict,
+    log_dir: str,
+    resume: str | None = None,
+):
+    """Factory that constructs or resumes a PPO or SAC model.
+
+    Parameters
+    ----------
+    algo:
+        Algorithm name — ``'ppo'`` or ``'sac'`` (case-insensitive).
+    env:
+        Vectorised Gymnasium environment passed to the model constructor.
+    cfg:
+        Flat dict of algorithm hyperparameters (keys match SB3 constructor
+        kwargs, plus ``total_timesteps`` which is handled by the caller).
+    log_dir:
+        TensorBoard log directory for the run.
+    resume:
+        Optional path to a ``.zip`` checkpoint from which to resume
+        training.  When given the matching SB3 class is used to load the
+        file; ``env`` and ``tensorboard_log`` are rebound to the new run.
+    """
+    algo = algo.lower()
+
+    if algo == "ppo":
+        cls = PPO
+    elif algo == "sac":
+        cls = SAC
+    else:
+        raise ValueError(
+            f"Unknown algorithm: {algo!r}. Choose 'ppo' or 'sac'."
+        )
+
+    if resume:
+        return cls.load(resume, env=env, tensorboard_log=log_dir)
+
+    # Build kwargs from cfg — exclude non-SB3 keys handled by the caller.
+    _caller_keys = {"total_timesteps"}
+    kwargs = {k: v for k, v in cfg.items() if k not in _caller_keys}
+
+    return cls(
+        policy="MultiInputPolicy",
+        env=env,
+        tensorboard_log=log_dir,
+        verbose=1,
+        **kwargs,
+    )
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Train PPO on AirSim")
+    parser = argparse.ArgumentParser(description="Train PPO/SAC on AirSim")
+    parser.add_argument(
+        "--algo", type=str, default="ppo", choices=["ppo", "sac"],
+        help="RL algorithm: 'ppo' (default) or 'sac'",
+    )
     parser.add_argument(
         "--config", type=str, default="configs/train_ppo.yaml",
         help="Path to YAML config",
@@ -155,7 +211,7 @@ def main():
     args = parser.parse_args()
 
     # --- Auto-launch AirSim if not running ---
-    print("[train_ppo] Starting...", flush=True)
+    print(f"[train:{args.algo}] Starting...", flush=True)
     launch_airsim_if_needed(port=args.base_port, shortcut_path=args.airsim_path)
 
     with open(args.config, "r") as f:
@@ -172,15 +228,17 @@ def main():
             reward_override = yaml.safe_load(f)
         cfg.setdefault("reward", {}).update(reward_override)
 
-    ppo_cfg = cfg["ppo"]
+    algo = args.algo
+    # Fall back to "ppo" section when a PPO config is used with --algo ppo
+    algo_cfg = cfg.get(algo, cfg.get("ppo", {}))
     out_cfg = cfg["output"]
     frame_stack = cfg.get("frame_stack", 4)
 
-    total_timesteps = args.total_timesteps or ppo_cfg["total_timesteps"]
+    total_timesteps = args.total_timesteps or algo_cfg["total_timesteps"]
 
     # Timestamped run directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = args.run_name or f"ppo_{timestamp}"
+    run_name = args.run_name or f"{algo}_{timestamp}"
     run_dir = os.path.join(out_cfg["log_dir"], run_name)
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
@@ -189,25 +247,25 @@ def main():
     num_envs = args.num_envs
     base_port = args.base_port
 
-    print(f"[train_ppo] Creating training environment (port {base_port})...", flush=True)
+    print(f"[train:{algo}] Creating training environment (port {base_port})...", flush=True)
     train_env = make_vec_env(cfg, num_envs=num_envs, base_port=base_port)
     train_env = VecFrameStack(train_env, n_stack=frame_stack, channels_order="last")
-    print("[train_ppo] Training environment ready.", flush=True)
+    print(f"[train:{algo}] Training environment ready.", flush=True)
 
     # Eval env: share the first AirSim instance (base_port) so a single
     # AirSim launch works for both training and periodic evaluation.
     # When num_envs > 1, use a dedicated instance after all train envs.
     eval_port = base_port if num_envs == 1 else base_port + num_envs
-    print(f"[train_ppo] Creating eval environment (port {eval_port})...", flush=True)
+    print(f"[train:{algo}] Creating eval environment (port {eval_port})...", flush=True)
     eval_env = make_vec_env(cfg, num_envs=1, base_port=eval_port)
     eval_env = VecFrameStack(eval_env, n_stack=frame_stack, channels_order="last")
-    print("[train_ppo] Eval environment ready.", flush=True)
+    print(f"[train:{algo}] Eval environment ready.", flush=True)
 
     # --- Callbacks ---
     checkpoint_cb = CheckpointCallback(
         save_freq=out_cfg.get("checkpoint_freq", 10000),
         save_path=ckpt_dir,
-        name_prefix="ppo",
+        name_prefix=algo,
     )
     eval_cb = EvalCallback(
         eval_env,
@@ -220,33 +278,12 @@ def main():
 
     # --- Model ---
     if args.resume:
-        print(f"[train_ppo] Resuming from checkpoint: {args.resume}")
-        model = PPO.load(
-            args.resume,
-            env=train_env,
-            tensorboard_log=run_dir,
-        )
-    else:
-        model = PPO(
-            policy="MultiInputPolicy",
-            env=train_env,
-            learning_rate=ppo_cfg["learning_rate"],
-            n_steps=ppo_cfg["n_steps"],
-            batch_size=ppo_cfg["batch_size"],
-            n_epochs=ppo_cfg["n_epochs"],
-            gamma=ppo_cfg["gamma"],
-            gae_lambda=ppo_cfg["gae_lambda"],
-            clip_range=ppo_cfg["clip_range"],
-            ent_coef=ppo_cfg["ent_coef"],
-            vf_coef=ppo_cfg["vf_coef"],
-            max_grad_norm=ppo_cfg["max_grad_norm"],
-            tensorboard_log=run_dir,
-            verbose=1,
-        )
+        print(f"[train] Resuming {algo.upper()} from checkpoint: {args.resume}")
+    model = build_model(algo, train_env, algo_cfg, log_dir=run_dir, resume=args.resume)
 
-    print(f"[train_ppo] Run directory: {run_dir}")
-    print(f"[train_ppo] Total timesteps: {total_timesteps}")
-    print(f"[train_ppo] Parallel envs: {num_envs} (ports {base_port}–{base_port + num_envs - 1},"
+    print(f"[train:{algo}] Run directory: {run_dir}")
+    print(f"[train:{algo}] Total timesteps: {total_timesteps}")
+    print(f"[train:{algo}] Parallel envs: {num_envs} (ports {base_port}–{base_port + num_envs - 1},"
           f" eval on {eval_port})")
 
     reward_cb = RewardLoggingCallback()
@@ -262,7 +299,7 @@ def main():
                 env_config_paths, rotate_every_episodes=rotate_every
             )
             callbacks.append(env_scheduler)
-            print(f"[train_ppo] Multi-env rotation ENABLED ({len(env_config_paths)} configs, "
+            print(f"[train:{algo}] Multi-env rotation ENABLED ({len(env_config_paths)} configs, "
                   f"rotate every {rotate_every} episodes)")
 
     try:
@@ -272,11 +309,11 @@ def main():
             reset_num_timesteps=not bool(args.resume),
         )
     except KeyboardInterrupt:
-        print("\n[train_ppo] Training interrupted by user.")
+        print(f"\n[train:{algo}] Training interrupted by user.")
     finally:
         final_path = os.path.join(run_dir, "final_model")
         model.save(final_path)
-        print(f"[train_ppo] Final model saved to {final_path}.zip")
+        print(f"[train:{algo}] Final model saved to {final_path}.zip")
         train_env.close()
         eval_env.close()
 
