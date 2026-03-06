@@ -138,7 +138,7 @@ class SafetyNode:
     def _estop_cb(self, msg):
         self._estop = msg.data
         if self._estop:
-            self._node.get_logger().warn("E-STOP ACTIVE — zeroing all commands")
+            self._node.get_logger().warning("E-STOP ACTIVE — zeroing all commands")
         else:
             self._node.get_logger().info("E-stop cleared")
 
