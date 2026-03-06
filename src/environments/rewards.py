@@ -29,7 +29,7 @@ class RewardFunction:
         drift_error: float = 0.0,
     ) -> tuple[float, dict]:
         """Return (total_reward, info_dict) for a single step."""
-        r_progress = self.w_progress * vx_body
+        r_progress = self.w_progress * max(0.0, vx_body)
         r_collision = self.w_collision if has_collided else 0.0
         r_smoothness = self.w_smoothness * float(np.linalg.norm(action - prev_action))
         r_drift = self.w_drift * drift_error
