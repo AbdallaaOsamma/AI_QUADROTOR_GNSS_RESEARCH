@@ -28,15 +28,15 @@ class TestRewardFunction:
         assert info["r_collision"] == 0.0
         assert reward > 0
 
-    def test_backward_motion_zero_progress(self):
-        """Negative vx_body should yield zero progress reward (no incentive to fly backward)."""
+    def test_backward_motion_negative(self):
+        """Negative vx_body should yield negative progress reward."""
         reward, info = self.reward_fn(
             vx_body=-1.0,
             has_collided=False,
             action=np.array([-0.3, 0.0, 0.0]),
             prev_action=np.array([-0.3, 0.0, 0.0]),
         )
-        assert info["r_progress"] == pytest.approx(0.0)
+        assert info["r_progress"] == pytest.approx(-0.5)
 
     def test_collision_penalty(self):
         """Collision should apply large negative penalty."""
