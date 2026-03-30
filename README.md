@@ -4,7 +4,7 @@
 
 **Deep Reinforcement Learning for Autonomous Flight in GNSS-Denied Environments**
 
-[![CI](https://github.com/Abood204/AI_QUADROTOR_GNSS_RESEARCH/actions/workflows/ci.yml/badge.svg)](https://github.com/Abood204/AI_QUADROTOR_GNSS_RESEARCH/actions/workflows/ci.yml)
+[![CI](https://github.com/AbdallaaOsamma/AI_QUADROTOR_GNSS_RESEARCH/actions/workflows/ci.yml/badge.svg)](https://github.com/AbdallaaOsamma/AI_QUADROTOR_GNSS_RESEARCH/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -347,7 +347,7 @@ reward:
 
 | Tag | Description |
 |-----|-------------|
-| `v1.0-ppo-baseline` | PPO complete: training, ablations, evaluation, statistical analysis |
+| [`v1.0-ppo-baseline`](https://github.com/AbdallaaOsamma/AI_QUADROTOR_GNSS_RESEARCH/releases/tag/v1.0-ppo-baseline) | PPO complete: training, ablations, evaluation, statistical analysis |
 | `v1.1-sac-comparison` | *(upcoming)* PPO vs SAC comparative results |
 
 ---
@@ -380,7 +380,7 @@ If you use this work, please cite:
   year         = {2026},
   publisher    = {GitHub},
   journal      = {GitHub repository},
-  howpublished = {\url{https://github.com/Abood204/AI_QUADROTOR_GNSS_RESEARCH}},
+  howpublished = {\url{https://github.com/AbdallaaOsamma/AI_QUADROTOR_GNSS_RESEARCH}},
   institution  = {Heriot-Watt University Dubai},
   note         = {FYP Thesis, B50PR}
 }
