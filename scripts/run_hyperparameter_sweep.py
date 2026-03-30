@@ -13,15 +13,15 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 
-import numpy as np
 import optuna
 
 
 def run_trial(config_overrides: dict, total_timesteps: int = 50_000) -> float:
-    """Launch train.py as a subprocess and return the mean eval reward.
+    """Launch train.py as a subprocess and return the mean training reward.
 
     Parameters
     ----------
@@ -35,13 +35,26 @@ def run_trial(config_overrides: dict, total_timesteps: int = 50_000) -> float:
     Returns
     -------
     float
-        Mean reward from the last evaluation checkpoint recorded in
-        ``evaluations.npz``.  Returns ``float("-inf")`` on subprocess failure
-        or if the evaluation file is missing.
+        Mean episode reward from the last logged rollout (``ep_rew_mean`` in
+        SB3's verbose output).  Returns ``float("-inf")`` on subprocess failure
+        or if no rollout data was captured.
+
+    Notes
+    -----
+    Eval is disabled (``--no_eval``) because the Optuna sweep typically runs
+    with a single AirSim instance on port 41451.  The eval port (41452) is not
+    available, so ``EvalCallback`` would never write ``evaluations.npz`` and
+    every trial would silently score ``-inf``.  Using training reward from
+    stdout is simpler and avoids requiring a second AirSim instance.
     """
     import subprocess
 
     with tempfile.TemporaryDirectory() as tmp_log_dir:
+        # Inject log_dir via overrides (train.py has no --log_dir flag)
+        overrides_with_dir = {
+            **config_overrides,
+            "output": {"log_dir": tmp_log_dir},
+        }
         cmd = [
             sys.executable,
             "-m",
@@ -52,10 +65,9 @@ def run_trial(config_overrides: dict, total_timesteps: int = 50_000) -> float:
             str(total_timesteps),
             "--run_name",
             "optuna_trial",
-            "--log_dir",
-            tmp_log_dir,
+            "--no_eval",   # eval port 41452 not available during sweep
             "--overrides",
-            json.dumps(config_overrides),
+            json.dumps(overrides_with_dir),
         ]
 
         result = subprocess.run(
@@ -67,47 +79,16 @@ def run_trial(config_overrides: dict, total_timesteps: int = 50_000) -> float:
         if result.returncode != 0:
             return float("-inf")
 
-        # SB3 EvalCallback writes evaluations.npz with shape (n_evals, n_episodes)
-        # under <log_dir>/<run_name>/evaluations.npz
-        eval_path = os.path.join(tmp_log_dir, "optuna_trial", "evaluations.npz")
-        if not os.path.isfile(eval_path):
+        # SB3 with verbose=1 prints a table containing "| ep_rew_mean  |  <value> |"
+        # after each rollout.  Extract all occurrences and return the last one.
+        matches = re.findall(
+            r"\|\s*ep_rew_mean\s*\|\s*([-\d.eE+]+)\s*\|",
+            result.stdout,
+        )
+        if not matches:
             return float("-inf")
 
-        data = np.load(eval_path)
-        # ``results`` has shape (n_evals, n_episodes); take mean of the last eval.
-        results = data["results"]
-        if results.size == 0:
-            return float("-inf")
-
-        return float(results[-1].mean())
-
-
-def objective(trial: optuna.Trial) -> float:
-    """Optuna objective function.
-
-    Samples:
-    - ``w_progress``    — forward-progress reward weight [0.1, 2.0]
-    - ``w_smoothness``  — action-smoothness penalty weight [-1.0, 0.0]
-    - ``learning_rate`` — PPO learning rate (log-uniform) [1e-5, 1e-3]
-    - ``n_steps``       — PPO rollout buffer size, categorical {512, 1024, 2048}
-
-    Returns the mean eval reward from ``run_trial``.
-    """
-    w_progress = trial.suggest_float("w_progress", 0.1, 2.0)
-    w_smoothness = trial.suggest_float("w_smoothness", -1.0, 0.0)
-    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
-    n_steps = trial.suggest_categorical("n_steps", [512, 1024, 2048])
-
-    config_overrides = {
-        "rewards": {
-            "w_progress": w_progress,
-            "w_smoothness": w_smoothness,
-        },
-        "learning_rate": learning_rate,
-        "n_steps": n_steps,
-    }
-
-    return run_trial(config_overrides)
+        return float(matches[-1])
 
 
 def main() -> None:
@@ -164,12 +145,14 @@ Examples:
         n_steps = trial.suggest_categorical("n_steps", [512, 1024, 2048])
 
         config_overrides = {
-            "rewards": {
+            "reward": {
                 "w_progress": w_progress,
                 "w_smoothness": w_smoothness,
             },
-            "learning_rate": learning_rate,
-            "n_steps": n_steps,
+            "ppo": {
+                "learning_rate": learning_rate,
+                "n_steps": n_steps,
+            },
         }
 
         return run_trial(config_overrides, total_timesteps=args.total_timesteps)

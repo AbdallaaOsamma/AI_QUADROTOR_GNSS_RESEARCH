@@ -1,0 +1,95 @@
+name: Bug Report
+description: Report a bug or unexpected behaviour
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the information below to help us reproduce and fix the issue.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system is affected?
+      options:
+        - Training (src/training)
+        - Environment / AirSim wrapper (src/environments)
+        - Evaluation (src/evaluation)
+        - Safety monitor (src/safety)
+        - Deployment (src/deployment)
+        - Scripts (scripts/)
+        - Tests (tests/)
+        - Configuration (configs/)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is.
+      placeholder: "When I run X, Y happens instead of Z..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Run `python -m src.training.train --config configs/train_ppo_dr.yaml`
+        2. After N steps, observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback / Error Output
+      description: Paste the full error traceback here.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      placeholder: "e.g. 3.11.4"
+    validations:
+      required: true
+
+  - type: input
+    id: airsim-version
+    attributes:
+      label: AirSim Version
+      placeholder: "e.g. 1.8.1 (or N/A if not using AirSim)"
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. Ubuntu 22.04 / Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU (if training-related)
+      placeholder: "e.g. NVIDIA RTX 3090 / N/A"
+    validations:
+      required: false

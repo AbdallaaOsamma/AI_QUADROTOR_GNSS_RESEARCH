@@ -47,8 +47,8 @@ MODEL_CONFIGS: dict[str, str] = {
     "abl3_with_dr": "configs/train_ppo_dr.yaml",
 }
 
-# Old timestamped run directories to ignore
-_SKIP_PATTERNS = ("ppo_2026", "ppo_2025", "smoke")
+# Transient / non-experiment directories to ignore
+_SKIP_PATTERNS = ("smoke", "optuna_trial", "tmp_")
 
 # ---------------------------------------------------------------------------
 # Discovery

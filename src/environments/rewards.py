@@ -19,6 +19,10 @@ class RewardFunction:
         self.w_collision = cfg.get("w_collision", -100.0)
         self.w_smoothness = cfg.get("w_smoothness", -0.1)
         self.w_drift = cfg.get("w_drift", 0.0)
+        self.w_proximity = cfg.get("w_proximity", 0.0)
+        # Normalized depth threshold below which proximity penalty activates.
+        # At depth_clip_m=8m: 0.25 = 2m, 0.1875 = 1.5m, 0.125 = 1m.
+        self.proximity_threshold = cfg.get("proximity_threshold", 0.25)
 
     def __call__(
         self,
@@ -27,20 +31,26 @@ class RewardFunction:
         action: np.ndarray,
         prev_action: np.ndarray,
         drift_error: float = 0.0,
+        min_depth: float = 1.0,
     ) -> tuple[float, dict]:
         """Return (total_reward, info_dict) for a single step."""
         r_progress = self.w_progress * vx_body
         r_collision = self.w_collision if has_collided else 0.0
         r_smoothness = self.w_smoothness * float(np.linalg.norm(action - prev_action))
         r_drift = self.w_drift * drift_error
+        r_proximity = (
+            -self.w_proximity * max(0.0, self.proximity_threshold - min_depth)
+            if self.w_proximity != 0.0 else 0.0
+        )
 
-        total = r_progress + r_collision + r_smoothness + r_drift
+        total = r_progress + r_collision + r_smoothness + r_drift + r_proximity
 
         info = {
             "r_progress": r_progress,
             "r_collision": r_collision,
             "r_smoothness": r_smoothness,
             "r_drift": r_drift,
+            "r_proximity": r_proximity,
         }
         return total, info
 

@@ -112,7 +112,7 @@ class TestEpisodeSummary:
         summary = compute_episode_summary(traj, dt=0.1, collided=False)
         assert "distance_before_collision_m" in summary
         assert "average_speed_ms" in summary
-        assert "path_smoothness_jerk" in summary
+        assert "path_smoothness_accel_ms2" in summary
         assert "survival_time_s" in summary
         assert summary["collided"] is False
         assert summary["total_steps"] == 50

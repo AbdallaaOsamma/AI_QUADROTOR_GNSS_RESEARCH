@@ -1,0 +1,74 @@
+# Parking Fine-Tune Configuration
+# Fine-tunes a pre-trained NH policy for underground parking deployment.
+#
+# Real-world constraints:
+#   Lane width : ~3 m
+#   Ceiling    : ~2 m
+#   Obstacles  : pillars (thin, vertical) + parked cars (medium, boxy)
+#
+# Strategy:
+#   - Resume from best NH model (--resume logs/ppo/.../best_model/best_model.zip)
+#   - Constrain velocity/altitude to parking-safe values
+#   - Compress depth clip from 20m -> 8m (parking max visibility)
+#   - Add proximity penalty so policy learns sustained wall-clearance,
+#     not just terminal-collision avoidance
+#   - Low learning rate (5e-5) to adapt at margins, preserve NH knowledge
+#   - Small clip_range (0.1) to prevent catastrophic forgetting
+#
+# Usage:
+#   python -m src.training.train \
+#     --config configs/train_ppo_parking_finetune.yaml \
+#     --resume logs/ppo/ppo_20260307_002628/best_model/best_model.zip
+
+env:
+  ip: ""
+  image_shape: [84, 84, 1]
+  target_alt: 2.0 # NH needs clearance from terrain (parking ceiling enforced by proximity reward)
+  max_vx: 1.5 # Safe speed for 3m lanes (was 3.0 in NH)
+  max_vy: 1.0 # Full lateral authority for corridor weaving
+  max_yaw_rate_deg: 90 # Sharp turns needed at corridor junctions (was 45)
+  dt: 0.1
+  max_steps: 512 # Shorter episodes — parking nav is tight
+  depth_clip_m: 8.0 # Parking visibility range (was 20m in NH)
+
+reward:
+  w_progress: 0.5
+  w_collision: -100.0
+  w_smoothness: -0.1
+  w_drift: 0.0
+  # Proximity penalty: fires continuously when any obstacle closer than 2m
+  # At depth_clip_m=8m: threshold 0.25 = 2.0m, 0.1875 = 1.5m, 0.125 = 1.0m
+  # penalty = -2.0 * max(0, 0.25 - min_depth)
+  # At 1.5m: -0.125  |  At 1.0m: -0.25  |  At 0.5m: -0.375  |  At 0m: -0.5
+  # Max progress/step = 0.5 * 1.5 = 0.75, so penalty is meaningful but not dominant
+  w_proximity: 2.0
+  proximity_threshold: 0.25
+
+ppo:
+  learning_rate: 5.0e-5 # 6x lower than NH — fine-tuning, not full training
+  n_steps: 1024 # Shorter rollouts for faster feedback
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1 # Half of NH clip_range — prevents catastrophic forgetting
+  ent_coef: 0.02 # Slightly higher entropy — explore new tight-space behaviors
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  total_timesteps: 975000 # 475k (NH base) + 500k new fine-tune steps = 975k ceiling
+
+frame_stack: 4
+
+domain_randomization:
+  enabled: true
+  depth_noise_std: 0.04 # Reflective floors + poor IR on dark surfaces in parking
+  # Tight spawn radius: 3m lane means drone can start offset by up to 1m safely
+  spawn_radius_m: 1.5
+  # Full yaw randomization: must handle corridors from any approach angle
+
+output:
+  log_dir: "logs/ppo"
+  checkpoint_dir: "models/rl"
+  checkpoint_freq: 10000
+  eval_freq: 5000
+  eval_episodes: 5

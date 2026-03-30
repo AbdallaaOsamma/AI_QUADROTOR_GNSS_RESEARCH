@@ -47,21 +47,16 @@ def test_anova_two_groups():
 
 
 def test_paired_ttest_unequal_lengths():
-    """Unequal-length arrays should warn but still return valid results via truncation."""
-    import warnings
+    """Unequal-length arrays should return valid results (Welch's t-test handles this)."""
     import numpy as np
     from scripts.run_statistical_analysis import run_paired_ttest
     a = np.array([1.0, 1.1, 0.9, 1.05, 0.95])
     b = np.array([2.0, 2.1, 1.9])
-    n = min(len(a), len(b))
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        result = run_paired_ttest(a, b)
-        our_warnings = [x for x in w if "unequal lengths" in str(x.message)]
-        assert len(our_warnings) == 1
+    result = run_paired_ttest(a, b)
     assert "p_value" in result
     assert "statistic" in result
-    assert result["mean_a"] == float(np.mean(a[:n]))
+    assert result["mean_a"] == float(np.mean(a))
+    assert result["mean_b"] == float(np.mean(b))
 
 
 def test_anova_insufficient_samples():

@@ -82,13 +82,27 @@ def test_velocity_clamping_negative():
 
 
 def test_proximity_braking_triggers():
-    """Forward vx must scale to 20% when centre ROI depth < 1.5m."""
-    from ros_ws.src.safety_monitor.safety_monitor.safety_node import apply_safety
+    """Forward vx scales linearly when centre ROI depth < 1.5m threshold.
 
+    At 1.0m obstacle with 1.5m threshold:
+      t = 1.0 / 1.5 = 0.6667
+      scale = 0.2 + 0.6667 * (1.0 - 0.2) = 0.7333
+      vx = 2.0 * 0.7333 = 1.4667
+    """
+    from ros_ws.src.safety_monitor.safety_monitor.safety_node import (
+        _PROXIMITY_SCALE,
+        _PROXIMITY_THRESH_M,
+        apply_safety,
+    )
+
+    min_depth = 1.0  # obstacle depth in centre ROI
     depth = np.full((84, 84), 5.0, dtype=np.float32)
-    depth[30:54, 30:54] = 1.0  # 1m obstacle in centre ROI
+    depth[30:54, 30:54] = min_depth
     vx, vy, yaw = apply_safety(2.0, 0.0, 0.0, depth_m=depth, estop=False)
-    assert vx == pytest.approx(2.0 * 0.2)
+
+    t = min_depth / _PROXIMITY_THRESH_M
+    expected_scale = _PROXIMITY_SCALE + t * (1.0 - _PROXIMITY_SCALE)
+    assert vx == pytest.approx(2.0 * expected_scale, rel=1e-5)
 
 
 def test_proximity_braking_no_trigger():

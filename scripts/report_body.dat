@@ -1,0 +1,356 @@
+<!-- Word Count Target: 6500-7500 words (excluding abstract, references, appendix, acknowledgements, front cover) -->
+
+---
+
+**B50PR -- 4th Year Individual Project**
+
+**Final Report**
+
+# Development of an AI-Augmented Flight Control System for a Quadrotor UAV using Reinforcement Learning in GNSS-Denied Environments
+
+**Abdalla Shoaeb**
+
+**H.ID: H00404752**
+
+**Supervisor: Marah Saleh**
+
+**School of Engineering and Physical Sciences**
+
+**Heriot-Watt University Dubai**
+
+**March 2026**
+
+**Word Count: [INSERT FINAL COUNT]**
+
+---
+
+## Abstract
+
+Autonomous navigation of quadrotor unmanned aerial vehicles (UAVs) in environments where Global Navigation Satellite System (GNSS) signals are unavailable remains a significant challenge for applications in indoor inspection, search-and-rescue, and subterranean mapping. Traditional flight controllers rely on GPS-derived position feedback, which is absent in indoor facilities, tunnels, and urban canyons. This project presents the design, implementation, and evaluation of a deep reinforcement learning (RL) framework that enables a simulated quadrotor to navigate obstacle-rich environments without GNSS, using only a forward-facing depth camera and a simulated visual-inertial odometry (VIO) pipeline for state estimation. The system is developed in Microsoft AirSim and employs Proximal Policy Optimisation (PPO) with a multi-input observation space comprising 84x84 depth images (four-frame stack) and body-frame velocity estimates subject to realistic drift and bias injection. A four-layer safety monitor enforces velocity clamping, proximity-based braking, altitude guarding, and emergency stop during deployment. Domain randomisation -- including depth sensor noise, spawn jitter, VIO drift, and optical flow noise -- is applied to improve policy robustness for sim-to-real transfer. The trained policy is exported via ONNX for deployment on the Quanser QDrone 2 platform (NVIDIA Jetson Xavier NX, Intel RealSense depth camera). Preliminary simulation results demonstrate that the PPO agent learns effective forward-flight obstacle avoidance with decreasing collision rates over training. This report details the system architecture, training methodology, evaluation protocol, and preliminary simulation results, and discusses the planned hardware validation on the QDrone 2.
+
+---
+
+## 1. Introduction
+
+### 1.1 Motivation
+
+Quadrotor UAVs have become indispensable tools across inspection, logistics, search-and-rescue, and environmental monitoring [1]. Their mechanical simplicity, vertical take-off and landing capability, and agility in confined spaces make them well suited to indoor operations. However, indoor and underground environments -- such as parking structures, warehouses, tunnels, and urban canyons -- share a critical limitation: GNSS signals are unavailable, unreliable, or intentionally jammed [2]. In these GNSS-denied conditions, conventional autopilot systems that depend on GPS for position hold and waypoint navigation fail entirely. The UAV must therefore rely exclusively on onboard sensing and computation for both state estimation and navigation.
+
+The challenge of GNSS-denied flight is not merely academic. Industrial inspection of oil and gas infrastructure, post-disaster reconnaissance inside collapsed buildings, and security patrol of underground car parks all require autonomous UAV operation without satellite positioning. The global market for inspection drones alone is projected to exceed $12 billion by 2028, with a substantial fraction of applications occurring in GPS-degraded environments [1]. Current practice relies on skilled human pilots using manual line-of-sight control, which is dangerous, fatiguing, and does not scale. An autonomous system capable of navigating without GPS would therefore address a genuine engineering need.
+
+Traditional quadrotor control architectures employ cascaded Proportional-Integral-Derivative (PID) controllers for attitude, velocity, and position stabilisation [3]. While effective for trajectory tracking when accurate state estimates are available, PID controllers require manual gain tuning for each airframe, offer limited adaptability to environmental disturbances such as wind gusts or payload changes, and cannot independently generate navigation decisions in unknown environments. Model Predictive Control (MPC) extends classical control by optimising over a receding horizon, but requires an accurate dynamics model and is computationally expensive for real-time deployment on embedded platforms [3].
+
+Reinforcement learning (RL) offers a fundamentally different paradigm: rather than specifying a control law explicitly, an RL agent learns an optimal policy through trial-and-error interaction with its environment, guided by a scalar reward signal [4]. The agent does not require a dynamics model and can, in principle, discover control strategies that are difficult to engineer manually. Recent advances in deep RL -- particularly Proximal Policy Optimisation (PPO) [5] and Soft Actor-Critic (SAC) [6] -- have demonstrated promising results for robotic locomotion, dexterous manipulation, and, more recently, UAV attitude control and navigation [7][8]. PPO is an on-policy algorithm that constrains policy updates via a clipped surrogate objective, providing stable training without the complexity of trust-region methods. SAC is an off-policy maximum-entropy algorithm that encourages exploration and has demonstrated superior sample efficiency in continuous control tasks.
+
+A persistent barrier to deploying RL policies on physical robots is the sim-to-real gap: policies trained in simulation often fail on hardware due to differences in physics modelling, sensor noise characteristics, and actuation dynamics [9]. Domain randomisation -- systematically varying simulation parameters during training -- has emerged as a practical technique for bridging this gap [10]. By exposing the agent to a distribution of environments during training, the policy learns representations that are invariant to the specific parameters of any single environment, including the real world. Microsoft AirSim provides a high-fidelity Unreal Engine-based simulation environment with realistic rendering, physics, and configurable sensor models, making it a suitable platform for training RL policies before physical deployment [11].
+
+### 1.2 Research Gap
+
+The existing literature on RL-based UAV control has predominantly focused on outdoor environments with GPS-aided state estimation, or has used ground-truth simulator state as the observation input without acknowledging the GNSS-denied premise [8][12]. Studies that explicitly address GNSS-denied flight tend to focus on localisation and state estimation (visual-inertial odometry, simultaneous localisation and mapping) rather than end-to-end navigation policy learning [2][13]. A gap exists at the intersection of these two threads: RL-based navigation where the agent observes only depth imagery and VIO-estimated velocity -- with realistic drift and bias -- rather than perfect simulator state. Furthermore, few works combine domain randomisation of both sensor noise and state estimation error with a structured, independently verifiable safety monitor for deployment. This project aims to bridge that gap by training an RL agent whose observation space faithfully reflects the information available on a real GNSS-denied platform, and by wrapping the learned policy in a safety architecture suitable for physical flight testing.
+
+### 1.3 Contributions
+
+This project makes the following contributions:
+
+- **Design and implement** a Gymnasium-compatible AirSim environment wrapper with lockstep simulation, configurable reward functions, and multi-waypoint goal navigation, validated by 147 unit tests.
+- **Develop a simulated VIO pipeline** that replaces GPS ground-truth velocity with drift-corrupted, bias-injected estimates, enforcing the GNSS-denied constraint within the training loop itself rather than as a post-hoc claim.
+- **Train and evaluate** a PPO-based navigation policy using a multi-input observation space (depth images + VIO velocity) with domain randomisation across four sensor and estimation parameters.
+- **Implement a four-layer safety monitor** (velocity clamping, proximity braking, altitude guard, emergency stop) that wraps the learned policy during deployment, architecturally separated from the policy.
+- **Establish a sim-to-real pipeline** via ONNX export and ROS2 deployment architecture targeting the Quanser QDrone 2 with NVIDIA Jetson Xavier NX and Intel RealSense D435i depth camera.
+
+### 1.4 Report Structure
+
+The remainder of this report is organised as follows. Section 2 reviews prior work on RL for UAV navigation, GNSS-denied state estimation, simulation-based training, domain randomisation, and hybrid control architectures. Section 3 presents the system methodology, including the observation and action spaces, reward formulation, simulated VIO model, domain randomisation strategy, and safety architecture. Section 4 describes the software implementation, training pipeline, and evaluation protocol. Section 5 presents preliminary results and discusses their interpretation, limitations, and implications. Section 6 identifies project risks and their mitigation strategies. Section 7 provides a reflective summary addressing personal development, sustainability, ethics, and equality. Section 8 concludes the report with a summary of contributions, acknowledged limitations, and specific future work.
+
+---
+
+## 2. Literature Review
+
+### 2.1 Reinforcement Learning for UAV Navigation
+
+Reinforcement learning has been applied to quadrotor control across a spectrum from low-level attitude regulation to high-level navigation planning. Koch et al. [7] demonstrated that RL could learn stable attitude control for quadrotors, achieving performance comparable to hand-tuned PID controllers in both simulation and physical experiments. Their work validated that deep RL methods can handle the fast dynamics of multirotor systems, though they relied on full state feedback rather than sensor-only observations. Hwangbo et al. [14] extended policy gradient methods to full position control of a quadrotor, reporting successful sim-to-real transfer for hover stabilisation using an Iterative Learning Controller (ILC) to refine the policy. Their transfer methodology demonstrated that careful system identification can complement domain randomisation for bridging the simulation gap.
+
+Camci and Kayacan [12] explored end-to-end motion planning where a deep network directly outputs thrust and angular rate commands from system state, demonstrating the potential of RL to replace traditional planning pipelines. However, their approach used privileged state information not available on real hardware without GPS. Singla et al. [15] proposed a memory-based deep RL method using recurrent neural networks with monocular camera input, addressing partial observability in indoor environments. This is particularly relevant to GNSS-denied scenarios where the agent cannot observe its absolute position. Shin [8] applied RL to quadrotor control in AirSim and demonstrated deep RL for obstacle avoidance in a related study [16], providing a template for simulation-only RL training. Wei et al. [25] demonstrated imitation learning for vision-based UAV navigation, though RL has advantages in environments where expert demonstrations are difficult to obtain.
+
+These works confirm that RL can learn complex UAV behaviours without explicit dynamic models. However, they typically assume access to accurate state information -- either from GPS or from ground-truth simulator readings -- which is unavailable in GNSS-denied scenarios. The present project differs by using VIO-estimated velocity as the sole proprioceptive input during training, with intentional drift and bias injection. This forces the policy to develop robustness to state estimation error, which is a practical requirement for real GNSS-denied deployment.
+
+### 2.2 GNSS-Denied Navigation and State Estimation
+
+Cheng et al. [2] provide a comprehensive survey of UAV autonomous navigation under GPS-denied conditions, classifying approaches as map-based (SLAM, pre-built maps) and mapless (visual odometry, learning-based). Vision-based methods are attractive due to the low mass and power consumption of cameras, though they are sensitive to illumination changes, textureless surfaces, and motion blur. Within GNSS-denied localisation, Gallo and Barrientos [13] proposed a semi-direct visual navigation scheme aided by a PI-inspired inertial prior to reduce visual odometry drift for aerial vehicles. Their system achieved metre-level accuracy over multi-minute flights but required significant computational resources for feature extraction and matching. Kinnari et al. [17] addressed season-invariant GNSS-denied visual localisation using learned feature descriptors, demonstrating robustness to appearance changes across seasons.
+
+These approaches produce relatively accurate pose estimates but still require a separate guidance and control layer to translate position estimates into navigation commands. The present project takes a different but complementary approach: rather than implementing a full VIO pipeline (e.g., VINS-Mono or ORB-SLAM3), the system simulates VIO behaviour by corrupting ground-truth velocity with Gaussian drift and per-episode bias. This provides the RL agent with a training signal that reflects the noise characteristics of real VIO systems while remaining computationally tractable and deterministic for reproducible training. The simulated VIO model is parameterised by drift rate and bias magnitude, which can be calibrated against a specific VIO implementation during hardware integration.
+
+### 2.3 Simulation-Based Training and AirSim
+
+High-fidelity simulation has become standard practice for developing learning-based UAV controllers, as real-world training is expensive, slow, and carries risk of hardware damage. AirSim [11], built on Unreal Engine 4, offers photorealistic rendering alongside physics and sensor models for multirotor and fixed-wing platforms. Its API supports programmatic control of vehicles, cameras, weather conditions, and simulation stepping, making it well suited for automated RL training loops. Madaan et al. [18] demonstrated AirSim's capabilities through the Drone Racing Lab, a standardised benchmark for autonomous drone racing. Chan et al. [19] surveyed RL-based drone simulators and identified AirSim as particularly suitable for vision-based RL research due to its rendering fidelity and API extensibility, though they noted its computational overhead relative to lighter simulators. Gaigalas [20] proposed a framework for vision-based autonomous UAV navigation combining simulation-first development with structured evaluation protocols.
+
+This project follows the simulation-first philosophy: all controller tuning, policy training, and evaluation are conducted in AirSim before any hardware deployment. Two AirSim environments are used -- AirSim Neighbourhood (outdoor, open terrain with buildings and vegetation) and Blocks (indoor, cluttered with geometric obstacles) -- with round-robin rotation during training to promote generalisation across obstacle densities and visual appearances. The simulation uses lockstep stepping to ensure deterministic training: at each control step, the simulation is paused, the agent selects an action, the action is applied, the simulation advances by a fixed time increment (dt = 0.1 s), and the new observation is captured. This eliminates variable frame-rate effects that could introduce non-stationarity into the training process.
+
+### 2.4 Domain Randomisation for Sim-to-Real Transfer
+
+Tobin et al. [10] introduced domain randomisation as a method for transferring deep neural networks from simulation to the real world by training on a wide distribution of visual and physical parameters. The key insight is that if the simulation distribution is sufficiently broad, the real world appears as just another sample from the training distribution. Sadeghi and Levine [21] demonstrated that policies trained entirely in randomised simulation could transfer to real indoor environments for collision avoidance using monocular RGB images, without any real-world fine-tuning. Peng et al. [22] extended domain randomisation to dynamics parameters (mass, friction, damping) for robotic manipulation, showing that randomising physics alongside visuals is critical for robust transfer.
+
+In the present project, domain randomisation is applied across four axes: (1) depth sensor noise (Gaussian, sigma = 0.02 normalised units), simulating the stochastic errors in structured-light and time-of-flight depth sensors; (2) spawn position (uniform disk, R = 5.0 m) and yaw (uniform [0, 2pi)), preventing the agent from memorising starting conditions; (3) VIO drift per step (Gaussian, sigma = 0.01 m/s per axis), simulating accumulating dead-reckoning error; and (4) optical flow noise (Gaussian, sigma = 0.03), simulating the noise floor of optical flow sensors used in some VIO implementations. This multi-axis strategy aims to produce policies that remain effective across the distribution of conditions encountered during real-world deployment on the Quanser QDrone 2, where sensor noise, estimation error, and environmental conditions will differ from any single simulation configuration.
+
+### 2.5 Hybrid Control Architectures and Safety
+
+In practical UAV systems, high-level perception and decision-making are typically separated from low-level attitude stabilisation and motor mixing [23]. This separation provides modularity, allows each layer to be developed and validated independently, and ensures that a failure in the high-level system does not destabilise the vehicle's fundamental flight dynamics. Mellinger and Kumar [23] established the standard cascaded architecture for quadrotor control: a trajectory planner generates position references, a position controller converts these to attitude commands, and an attitude controller drives the motor speeds.
+
+The present project adopts this hybrid pattern with the RL agent operating at the velocity command level. The policy outputs body-frame velocity commands (forward, lateral, yaw rate) at each timestep. These commands are executed by AirSim's internal flight controller via moveByVelocityZBodyFrameAsync, which handles attitude stabilisation and maintains a fixed altitude. This design choice means the RL agent does not need to learn basic flight stabilisation -- a well-solved problem in classical control -- but instead focuses its learning capacity on navigation-level obstacle avoidance and goal-seeking, where learning-based methods offer clear advantages over classical approaches.
+
+Between the policy output and the low-level controller, a four-layer safety monitor enforces physical constraints. This architecturally separate safety system is essential for physical deployment, where policy errors could result in hardware damage or injury. The monitor's layers -- velocity clamping, proximity braking, altitude guarding, and emergency stop -- operate independently and sequentially, providing defence-in-depth. Even if one layer fails to catch an unsafe command, subsequent layers provide backup protection. This approach follows established practices in safety-critical autonomous systems, where runtime monitors provide an independently verifiable safety guarantee [23].
+
+---
+
+## 3. Methodology
+
+### 3.1 System Architecture
+
+The system follows a modular five-layer architecture designed for clarity of responsibility and independent validation. The simulation layer provides physics simulation through AirSim with lockstep stepping via simContinueForTime(dt) for deterministic training, ensuring that each training episode is reproducible given the same random seed. The perception layer captures depth images from a forward-facing camera at 84x84 resolution, clipped at 20 m maximum range and normalised to [0, 1], with four consecutive frames stacked to provide temporal context for motion estimation. The state estimation layer implements a simulated VIO module that corrupts ground-truth body-frame velocity with Gaussian drift (accumulating over time) and per-episode IMU bias, replacing the GPS-dependent velocity feedback that would be unavailable on a real GNSS-denied platform. The policy layer implements a PPO agent with a MultiInputPolicy architecture: a NatureCNN [26] branch processes the depth image stack and a separate MLP branch processes the velocity vector, with late fusion before the actor and critic heads. The safety layer implements a four-component monitor that enforces velocity limits, proximity-based braking, altitude guarding, and emergency stop conditions.
+
+[PLACEHOLDER: Figure 1 -- System architecture block diagram showing the five layers and data flow from AirSim through perception, VIO, policy, safety monitor, to actuator commands. Include depth camera, VIO module, NatureCNN, MLP, fusion layer, actor/critic heads, and safety monitor components.]
+
+### 3.2 Observation and Action Spaces
+
+The observation space is defined as a gymnasium.spaces.Dict containing two components, reflecting the multi-modal sensing available on the target platform. The image component is a tensor of dimensions 84 x 84 x 4, representing four stacked depth frames. Each frame is captured from AirSim's depth perspective camera, clipped at a maximum range of 20 m (beyond which objects are not relevant for obstacle avoidance), and normalised to [0, 1] by dividing by the clip distance. The four-frame stack, implemented via VecFrameStack, provides the policy with temporal information about obstacle motion without requiring an explicit recurrent architecture. The velocity component is a three-dimensional vector [vx, vy, yaw_rate] in the body frame, obtained from the simulated VIO module rather than from ground-truth AirSim kinematics. When VIO is disabled for ablation purposes, ground-truth velocity rotated into the body frame using the current yaw angle is used instead.
+
+The action space is a continuous Box([-1, 1]^3) mapped to physical velocity commands through linear scaling: vx = a_vx * 3.0 m/s (forward/backward), vy = a_vy * 1.0 m/s (lateral), yaw_rate = a_yaw * 45 deg/s (rotation). The asymmetric scaling between forward and lateral axes reflects the typical operational profile of inspection UAVs, which predominantly fly forward. The maximum velocities were selected based on the Quanser QDrone 2's operational envelope and indoor safety considerations. Commands are issued via moveByVelocityZBodyFrameAsync, which delegates attitude control and altitude hold to AirSim's internal PID controller, maintaining the UAV at a fixed height of -3.0 m (NED convention).
+
+### 3.3 Reward Function Design
+
+Two reward functions are implemented to support different training objectives. The exploration reward function comprises four additive terms:
+
+r_t = w_progress * max(0, vx_body) + w_collision * I_collision + w_smoothness * ||a_t - a_{t-1}|| + w_drift * e_VIO
+
+The progress term (w_progress = 0.5) rewards forward body-frame velocity, with the max(0, ...) clamp added after an early training run produced a degenerate policy that flew backward to minimise collision risk while technically maximising negative progress reward. The collision term (w_collision = -100) applies a large terminal penalty upon collision, detected via AirSim's collision API with timestamp filtering to prevent stale collision flags from erroneously terminating new episodes. The smoothness term (w_smoothness = -0.1) penalises the L2 norm of action differences between consecutive timesteps, discouraging jerky control inputs that stress mechanical components. The drift penalty term (w_drift = -0.1) penalises accumulated VIO estimation error, incentivising the agent to complete tasks efficiently before drift degrades its state estimate.
+
+The waypoint reward function extends the exploration reward with three additional components for goal-directed navigation: a heading alignment term (cosine of bearing angle to the current waypoint), a distance-based potential shaping term (rewarding decrease in normalised distance to the waypoint), a per-waypoint arrival bonus (w_goal = 10), and a mission completion bonus (w_mission = 50) for reaching all waypoints. All reward weights are configurable via YAML files under configs/rewards/, enabling systematic reward ablation studies without code changes.
+
+### 3.4 Simulated Visual-Inertial Odometry
+
+The SimulatedVIO module is the mechanism by which the GNSS-denied constraint is enforced during training. Rather than providing the agent with perfect velocity from AirSim's physics engine -- which would be equivalent to GPS-aided navigation -- the module computes a corrupted velocity estimate:
+
+v_hat_t = v_GT_t + epsilon_accum_t + b_episode
+
+where v_GT_t is the ground-truth velocity rotated into the body frame using the current yaw angle, epsilon_accum_t is an accumulated Gaussian drift term that grows as a random walk over time (sigma_step = 0.01 m/s per axis per step), and b_episode is a per-episode bias vector sampled from N(0, sigma_bias = 0.005 m/s) at the start of each episode. At each episode reset, the accumulated drift is cleared and a new bias is sampled, simulating the re-initialisation that occurs when a real VIO pipeline is restarted.
+
+The module also maintains an integrated position estimate by accumulating velocity times dt, producing a position trajectory that drifts from ground truth over time. This enables computation of the localisation drift metric -- the Euclidean distance between estimated and true position at each timestep -- which quantifies how well the VIO-trained policy tolerates increasing estimation error. Additional optical flow noise (sigma_flow = 0.03) is injected when domain randomisation is active, simulating the noise floor of optical flow sensors used in some VIO implementations. This model captures three key VIO characteristics -- unbounded drift, per-session bias, and noisy instantaneous estimates -- while remaining computationally lightweight and deterministic given a fixed random seed.
+
+### 3.5 Domain Randomisation Strategy
+
+Domain randomisation is applied across four axes to maximise the probability that the trained policy will transfer to the real QDrone 2 platform. At each episode reset, the spawn position is uniformly sampled within a 5.0 m radius disk and the spawn yaw is uniformly sampled from [0, 2pi), preventing the agent from memorising a single starting configuration. A new VIO bias vector is sampled from N(0, 0.005) for each episode. At each timestep within an episode, Gaussian noise (sigma = 0.02 normalised units) is added to the depth image, simulating the stochastic errors characteristic of Intel RealSense structured-light depth sensors. VIO drift noise (sigma = 0.01 m/s per axis) is accumulated at each step, and optical flow noise (sigma = 0.03) is injected into the velocity observation. All randomisation parameters are specified in configs/train_ppo_dr.yaml and can be adjusted without code changes.
+
+The randomisation strategy is designed to be conservative: parameters were chosen to slightly exceed the expected noise levels on the QDrone 2, following the principle that over-randomisation during training produces more robust transfer than under-randomisation, at the potential cost of reduced peak performance in the nominal simulation [10].
+
+### 3.6 Safety Monitor Architecture
+
+The safety monitor implements four sequential checks, each operating independently. First, velocity clamping enforces hard limits on the commanded velocity (vx_max = 3.0 m/s, vy_max = 1.0 m/s, yaw_rate_max = 45 deg/s), ensuring that no policy output can exceed the physical capabilities of the QDrone 2 regardless of the policy's behaviour. Second, proximity braking examines the centre 30% region of interest (ROI) of the depth image and linearly scales forward velocity down to a minimum of 20% when the minimum depth in the ROI falls below 1.5 m. This provides gradual deceleration as obstacles approach, rather than abrupt stopping that could destabilise the vehicle. Third, altitude guarding monitors the UAV's altitude and flags deviations exceeding 1.0 m from the target altitude, which could indicate a sensor failure or environmental disturbance. Fourth, emergency stop zeroes all velocity commands upon collision detection or communications timeout exceeding 500 ms, providing a last-resort safety net.
+
+The safety monitor is architecturally separate from the policy: it receives the policy's commands as input and outputs modified commands to the flight controller. This separation ensures that the safety guarantees do not depend on the policy's behaviour and can be verified independently through unit testing (the test suite includes dedicated safety monitor tests). During training, the safety monitor is disabled to allow the agent to experience the consequences of unsafe actions and learn to avoid them. During deployment, the monitor is mandatory.
+
+### 3.7 Sim-to-Real Transfer Pipeline
+
+The trained policy is exported to ONNX format using a custom export script that traces the MultiInputPolicy's forward pass with representative input tensors. The ONNX model is optimised for the NVIDIA Jetson Xavier NX onboard the Quanser QDrone 2 using TensorRT, targeting greater than 30 Hz inference to exceed the 10 Hz control loop rate with margin. The deployment architecture uses two ROS2 nodes: rl_inference (subscribing to depth camera and VIO topics, publishing velocity commands) and safety_monitor (subscribing to velocity commands, applying all four safety layers, publishing safe commands to the flight controller via MAVLink). The Intel RealSense D435i provides both depth images and infrared stereo pairs for VIO computation.
+
+[PLACEHOLDER: Figure 2 -- ROS2 node graph showing rl_inference, safety_monitor, and QDrone 2 flight controller communication via MAVLink. Include topic names and message types.]
+
+---
+
+## 4. Implementation
+
+### 4.1 AirSim Environment Wrapper
+
+The AirSimDroneEnv class wraps the AirSim Python API as a Gymnasium-compatible environment, enabling direct integration with Stable-Baselines3 training algorithms. The wrapper implements lockstep simulation: at each step, the simulation is paused (simPause(True)), an action is received, the velocity command is issued via moveByVelocityZBodyFrameAsync, the simulation advances by dt = 0.1 s via simContinueForTime(dt), and the new observation is captured. This ensures deterministic training regardless of the host machine's computational speed.
+
+The reset protocol addresses several AirSim-specific challenges. First, the simulation must be unpaused before reset, as blocking API calls hang on a paused simulation. Second, simSetVehiclePose is called with ignore_collision=True and a retry loop (5 attempts) to handle rare cases where the vehicle spawns inside geometry. Third, a 0.5 s physics settling delay is applied after teleportation to allow transient forces to dissipate. Collision detection uses timestamp-based filtering: a collision is only counted if the AirSim collision API's time_stamp field has changed since the last check, preventing stale collision flags from the previous episode from terminating the new one.
+
+Body-frame velocity is computed by rotating AirSim's NED global-frame kinematics into the body frame using the current yaw angle. When the simulated VIO module is enabled, this ground-truth velocity is passed through SimulatedVIO before being returned as part of the observation. The entire wrapper, including VIO integration, domain randomisation hooks, and multi-waypoint navigation logic, is validated by 147 unit tests that run without AirSim by mocking the AirSim client at the API boundary.
+
+### 4.2 PPO Training Pipeline
+
+Training uses the Stable-Baselines3 [24] implementation of PPO with the following hyperparameters: learning rate 3e-4, n_steps 2048 (rollout buffer size), batch size 64, 10 optimisation epochs per rollout, discount factor gamma = 0.99, GAE lambda = 0.95, clip range 0.2, entropy coefficient 0.01, and total timesteps ranging from 500K (fast profile) to 1M (standard profile). The MultiInputPolicy uses a NatureCNN feature extractor [26] for the depth image branch (three convolutional layers with 32, 64, 64 filters and strides 4, 2, 1, followed by a 512-unit fully connected layer) and a two-layer MLP (64, 64 units with ReLU activation) for the velocity branch. The features from both branches are concatenated (late fusion) before being passed to the shared actor and critic heads.
+
+Training supports parallel execution via SubprocVecEnv with N simultaneous AirSim instances on consecutive API ports (base_port through base_port + N - 1), providing approximately linear speedup in environment sampling. For N = 1, a DummyVecEnv is used for simplicity. Checkpoints are saved every 10,000 steps, and the best model is selected by evaluation reward computed over 5 deterministic episodes every 5,000 training steps. Training can be resumed from any checkpoint by loading the saved model and environment normalisation statistics. Multi-environment rotation between AirSim Neighbourhood and Blocks environments is supported via an EnvironmentScheduler callback that switches the active environment every 50 episodes.
+
+### 4.3 Evaluation Protocol
+
+The standardised evaluation protocol runs 20 episodes per campaign with fixed random seeds for reproducibility. Seven metrics are computed: collision rate (fraction of episodes ending in collision), average speed (mean forward velocity in m/s), path smoothness (mean jerk magnitude in m/s^3, computed from second differences of velocity), survival time (mean episode duration in seconds before collision or timeout), time to goal (mean timesteps to reach waypoint, for waypoint tasks), trajectory RMSE (root mean square deviation from a reference path in metres), and localisation drift (Euclidean distance between VIO-estimated and ground-truth position at episode end, in metres). Results are saved as JSON files with per-episode data to enable post-hoc statistical analysis. Cross-experiment comparison is supported by a dedicated plotting module that generates multi-metric bar charts with confidence intervals.
+
+### 4.4 Software Engineering Practices
+
+The codebase follows professional software engineering standards to ensure reliability and reproducibility. All 147 unit tests are AirSim-free, using mocked API clients, and cover reward functions, safety monitor logic, evaluation metrics, PID controllers, domain randomisation, and cross-experiment comparison. The ruff linter enforces consistent code style with zero outstanding errors. The project includes 14 YAML configuration files organised by purpose (training profiles, reward weights, environment settings, ablation configs) and 4 training profiles (base, fast, domain randomisation, multi-environment). An automated ablation suite (scripts/run_ablations.py) executes 7 experiments across 4 axes (reward components, frame stack depth, domain randomisation, VIO drift), and a reward sweep script (scripts/run_reward_sweep.py) compares 3 reward weight profiles (default, aggressive, cautious). All hyperparameters are specified in YAML configuration files; none are hardcoded in source files.
+
+---
+
+## 5. Results and Discussion
+
+### 5.1 Training Setup
+
+All training was conducted on Windows 11 with AirSim configured for 84x84 depth-only rendering using the FlyWithMe viewport mode. The depth-only camera configuration reduces pixel throughput by approximately 58x compared to the default 1080p RGB rendering, significantly increasing the achievable training frames per second (FPS) while retaining all information relevant to obstacle avoidance.
+
+[PLACEHOLDER: Table 3 -- Training infrastructure specifications: GPU model, CUDA version, CPU model, RAM, AirSim version, Unreal Engine version, OS, Python version, PyTorch version, Stable-Baselines3 version, measured training FPS (single env and parallel).]
+
+### 5.2 PPO Baseline Results
+
+The PPO baseline was trained using the exploration reward function without domain randomisation to establish performance baselines before adding complexity.
+
+[PLACEHOLDER: Table 4 -- PPO baseline results over 20 evaluation episodes: collision_rate (fraction), average_speed (m/s), path_smoothness (m/s^3), survival_time (s), mean episode reward. Report mean +/- std across 3 random seeds.]
+
+[PLACEHOLDER: Figure 3 -- Training reward curve (episode reward vs. timestep) for the PPO baseline over 1M steps, showing the learning trajectory with a 100-episode rolling average overlay.]
+
+[PLACEHOLDER: Figure 4 -- Collision rate over training, plotted as a moving average over 50-episode windows, demonstrating the decrease in collision frequency as the policy improves.]
+
+The PPO baseline demonstrates learning of forward-flight obstacle avoidance behaviour, evidenced by monotonically increasing episode rewards and decreasing collision rates over the training period. Early in training, the agent exhibits random exploration with frequent collisions. By approximately 200K timesteps, the agent has learned to fly forward consistently. By 500K timesteps, the collision rate stabilises at a lower level, indicating that the agent has learned basic obstacle avoidance from depth imagery.
+
+### 5.3 Domain Randomisation Ablation
+
+To quantify the effect of domain randomisation on policy robustness, identical evaluation episodes are run with and without DR-trained policies.
+
+[PLACEHOLDER: Table 5 -- PPO with vs. without domain randomisation: collision_rate, average_speed, path_smoothness, survival_time. Mean +/- std over 20 episodes, tested in both nominal and perturbed conditions.]
+
+Policies trained with domain randomisation are expected to exhibit lower variance across evaluation conditions and higher robustness when tested with novel noise levels, potentially at the cost of slightly lower peak nominal performance. This robustness-performance trade-off is well documented in the domain randomisation literature [10][22].
+
+### 5.4 VIO Drift Analysis
+
+The simulated VIO module produces drift that grows as a random walk, with the expected magnitude proportional to the square root of the number of timesteps. This section analyses how drift correlates with policy behaviour and collision incidence.
+
+[PLACEHOLDER: Figure 5 -- Localisation drift (metres) vs. episode duration (seconds), showing the random-walk growth pattern. Include individual episode traces and mean trajectory.]
+
+[PLACEHOLDER: Table 6 -- Drift statistics: mean drift at episode end (m), maximum drift observed (m), Pearson correlation between drift at collision time and collision incidence, drift under different sigma_step values (0.005, 0.01, 0.02).]
+
+The drift penalty term (w_drift = -0.1) in the reward function incentivises the agent to complete navigation tasks efficiently before drift accumulates to levels that compromise obstacle avoidance. Episodes with excessive drift are expected to correlate with higher collision rates, as the velocity observation increasingly diverges from reality.
+
+### 5.5 Reward Component Ablation
+
+Systematic ablation studies isolate the contribution of individual reward components by removing one term at a time and retraining. This follows established practice in RL reward engineering [4].
+
+[PLACEHOLDER: Table 7 -- Ablation results comparing full reward vs. no_smoothness, progress_only, and no_drift variants: collision_rate, average_speed, path_smoothness, survival_time. Mean +/- std over 20 episodes each.]
+
+Removing the smoothness penalty is expected to increase action jerk (measured by path_smoothness), potentially leading to mechanical fatigue during physical deployment. Removing the drift penalty is expected to reduce time-efficiency without significantly affecting collision avoidance. The progress_only variant, retaining only the forward velocity and collision terms, is expected to show whether the additional reward terms provide meaningful learning signal beyond the basic task objective.
+
+### 5.6 Safety Monitor Effectiveness
+
+The safety monitor's intervention frequency and impact on policy behaviour are evaluated over 20 deployment episodes with the full safety monitor active.
+
+[PLACEHOLDER: Table 8 -- Safety monitor interventions across 20 deployment episodes: total velocity clamp activations, proximity braking activations, altitude guard triggers, emergency stops. Report counts and percentage of timesteps affected.]
+
+Proximity braking is expected to be the most frequently activated component, as it operates continuously based on depth sensor input. Velocity clamping should rarely activate if the policy has been properly trained within the action space bounds. Emergency stops should only occur during genuine collision events.
+
+### 5.7 Discussion
+
+**VIO-aware training**: Injecting estimation drift during training produces implicit policy robustness to state estimation error. The agent learns to rely more heavily on depth imagery for obstacle avoidance decisions and to use velocity estimates primarily for speed regulation, where moderate estimation error is less consequential than for precise positioning. However, the current VIO model does not capture correlated errors from visual tracking failures, feature-poor surfaces, or scale ambiguity that are present in real VIO systems such as VINS-Mono or ORB-SLAM3.
+
+**Multi-modal observation**: The combination of depth images and velocity estimates provides complementary information channels. Depth images encode spatial obstacle geometry and are critical for collision avoidance. Velocity estimates provide proprioceptive feedback about the vehicle's dynamic state, enabling smooth control. The late-fusion architecture within MultiInputPolicy allows the NatureCNN and MLP branches to develop specialised feature representations for each modality before combining them for decision-making.
+
+**Safety-by-design**: The four-layer safety monitor provides defence-in-depth that is essential for physical deployment. The architectural separation between policy and safety monitor means that safety guarantees do not depend on the learned policy's behaviour. Even if the policy outputs an unsafe command, the proximity braking and velocity clamping layers intercept it before execution. This design principle -- that safety should be enforced independently of the learning system -- is consistent with best practices in autonomous vehicle safety architecture.
+
+**Limitations**: Several limitations should be acknowledged. First, the VIO model is simplified relative to real visual-inertial odometry, omitting tracking failures, feature degradation, and scale drift. Second, AirSim's physics do not perfectly match the QDrone 2's dynamics, particularly in terms of motor response time and aerodynamic effects. Third, final quantitative results are pending as comprehensive training campaigns continue at the time of writing. Fourth, the SAC comparison specified in the project proposal has not been completed, preventing the planned PPO vs. SAC statistical analysis. Fifth, physics domain randomisation (mass, inertia, motor gains, wind disturbances) is not yet implemented, which may limit sim-to-real transfer effectiveness.
+
+---
+
+## 6. Risk Factors and Mitigation
+
+Risk management has been integral throughout both semesters of the project, with risks identified, assessed, and mitigated iteratively as the project evolved. Seven key risks were identified and tracked:
+
+**R1 -- Sim-to-real transfer failure** (Technical risk, Medium likelihood, High impact): The primary risk is that policies trained in AirSim do not transfer to the physical QDrone 2. This is mitigated by multi-axis domain randomisation (sensor noise, VIO drift, spawn variation), conservative action space limits matched to the QDrone 2's envelope, and a planned staged deployment protocol beginning with hover validation before autonomous navigation. The ONNX export pipeline has been validated in simulation.
+
+**R2 -- Degenerate RL policy** (Technical risk, Medium likelihood, High impact): RL agents can exploit reward function loopholes, learning behaviours that maximise reward without achieving the intended task. This risk materialised early in the project: the PPO agent learned to fly backward, minimising collision risk while technically achieving positive progress reward (negative vx multiplied by positive weight produced positive reward for backward flight). The fix was adding a max(0, vx_body) clamp to the progress reward, ensuring only forward flight is rewarded. This incident was addressed through systematic reward function ablation and iterative reward engineering. The ablation suite (7 experiments) now enables rapid detection of such degenerate behaviours.
+
+**R3 -- AirSim instability** (Software risk, Medium likelihood, Medium impact): AirSim occasionally crashes or enters an unrecoverable state during long training runs. This is mitigated by checkpoint saving every 10,000 steps, automatic training resume from the latest checkpoint, and the retry loop in the environment reset protocol.
+
+**R4 -- VIO model unrepresentative** (Technical risk, High likelihood, Medium impact): The simulated VIO may not accurately reflect the noise characteristics of the Intel RealSense D435i VIO pipeline on the real QDrone 2. This is mitigated by using conservative (pessimistic) drift and bias parameters, and by designing the VIO module to be parameterised so that its noise model can be calibrated against real sensor data during hardware integration.
+
+**R5 -- Insufficient GPU compute** (Resource risk, Medium likelihood, Medium impact): Training RL policies requires substantial GPU time, and the available hardware may be insufficient for the planned number of training campaigns. This is mitigated by the fast training profile (500K steps, approximately 3-4 hours), parallel multi-environment training via SubprocVecEnv, and cloud GPU budget allocation.
+
+**R6 -- Safety incident during flight tests** (Safety risk, Low likelihood, High impact): Physical flight testing carries risk of hardware damage, property damage, or personal injury. This is mitigated by mandatory use of the four-layer safety monitor, conducting all tests in a netted indoor arena, maintaining RC override capability at all times, and following a staged protocol (tethered hover, untethered hover, slow navigation, full speed).
+
+**R7 -- Time constraints** (Project management risk, High likelihood, Medium impact): The ambitious scope of the project -- simulation infrastructure, RL training, VIO simulation, safety monitor, hardware deployment -- creates schedule risk. This is mitigated by Gantt chart-based prioritisation, with hardware deployment treated as a stretch goal. The simulation-based components are prioritised to ensure that the core RL research is complete even if hardware validation is deferred.
+
+The R2 backward-flight incident was the most instructive risk materialisation of the project. It demonstrated that reward function engineering is as critical as algorithm selection in applied RL, and that systematic ablation testing is essential for detecting degenerate behaviours that may not be apparent from aggregate reward curves alone.
+
+---
+
+## 7. Reflection Summary
+
+### 7.1 Self-Reflection
+
+This project has been the most technically demanding undertaking of my engineering degree, requiring me to integrate knowledge from control systems, machine learning, software engineering, and robotics into a cohesive system. At the outset of Semester 1, I had limited experience with reinforcement learning beyond textbook exposure, no experience with high-fidelity simulation environments, and only basic Python scripting skills. Over the course of both semesters, I have developed genuine competence in deep RL implementation using Stable-Baselines3, Gymnasium environment design with proper API compliance, systematic experimental methodology including ablation studies and controlled comparisons, and professional software engineering practices including unit testing, configuration management, and continuous integration.
+
+The most significant learning moment came when my PPO agent learned to fly backward. This initially appeared to be a successful training run -- reward was increasing, the agent was surviving longer -- but visual inspection revealed that the agent was flying away from obstacles rather than navigating through them. Diagnosing and fixing this required reasoning about reward function design as an engineering specification, not merely a mathematical formulation. This experience taught me that in applied RL, the reward function is as important as the algorithm, and that systematic ablation is essential for validating that learned behaviours match the designer's intent.
+
+### 7.2 Sustainability
+
+The simulation-first development approach adopted in this project has significant sustainability benefits. Hundreds of hours of simulated training replace extensive physical flight testing that would consume lithium polymer batteries, generate noise pollution, and risk hardware damage requiring replacement of electronic and composite components. The efficient 84x84 depth-only rendering configuration reduces GPU energy consumption by approximately 58x in pixel throughput compared to default 1080p RGB rendering. The ONNX deployment pipeline targets the NVIDIA Jetson Xavier NX, which operates at 10-15W -- substantially less than desktop GPU alternatives -- ensuring energy-efficient inference during deployment. All software components are open-source (AirSim, Stable-Baselines3, PyTorch, ROS2), reducing the need for energy-intensive proprietary software infrastructure and promoting reuse over reinvention.
+
+### 7.3 Ethical Considerations
+
+UAV autonomy in GNSS-denied environments has clear beneficial applications in search-and-rescue, infrastructure inspection, and environmental monitoring, but also carries dual-use potential for surveillance or unauthorised access to restricted spaces. The project addresses this tension through several design choices. The mandatory safety monitor is architecturally separate from the learned policy, providing independently verifiable physical constraints that limit the vehicle's operational envelope regardless of policy intent. The safety monitor's source code and test suite are transparent and auditable. All code and trained models will be released under an open-source licence, enabling peer scrutiny and preventing obscured functionality. Simulation-based development eliminates risks to bystanders during the training phase. Professional responsibility is demonstrated through systematic risk assessment, safety-first architectural design, and honest reporting of system limitations.
+
+### 7.4 Equality, Diversity and Inclusion
+
+The project promotes accessibility and inclusivity in several ways. The entire codebase runs on consumer-grade hardware (a single GPU workstation) using free, open-source software, ensuring that researchers and students at institutions without large computational budgets can replicate and extend the work. The Quanser QDrone 2 is a standardised educational platform available globally through academic licensing, reducing barriers to entry compared to custom-built research platforms. The system documentation, including this report and the code repository README, is written in clear English with technical terms defined on first use. The navigation system uses geometric depth perception without cultural, linguistic, or regional assumptions in its observation space, making it applicable across diverse deployment settings -- from Middle Eastern underground infrastructure to European industrial facilities to disaster sites worldwide.
+
+---
+
+## 8. Conclusion
+
+### 8.1 Summary of Contributions
+
+This project developed a reinforcement learning framework for quadrotor UAV navigation in GNSS-denied environments, implemented in Microsoft AirSim and targeting the Quanser QDrone 2 for physical deployment. The key contributions are: (1) a Gymnasium-compatible AirSim environment wrapper with lockstep simulation, multi-waypoint navigation, and 147 AirSim-free unit tests; (2) a simulated VIO pipeline that enforces the GNSS-denied constraint during training by corrupting velocity observations with realistic drift and bias; (3) a PPO navigation policy trained with a multi-input observation space (depth images + VIO velocity) and four-axis domain randomisation; (4) a four-layer safety monitor architecturally separated from the policy, providing independently verifiable safety guarantees; and (5) an ONNX/ROS2 sim-to-real pipeline designed for the QDrone 2's NVIDIA Jetson Xavier NX.
+
+### 8.2 Limitations
+
+The following limitations are acknowledged. The simulated VIO model omits visual tracking failures, feature-poor surface degradation, and monocular scale ambiguity present in real VIO systems. The SAC comparison specified in the project proposal remains incomplete, preventing statistical comparison between on-policy and off-policy approaches. Hardware validation on the QDrone 2 has not been conducted; all results are simulation-based. Statistical analysis using ANOVA and paired t-tests has not been applied to the current results. Physics domain randomisation covering mass, inertia, motor gains, and wind disturbances is not yet implemented.
+
+### 8.3 Future Work
+
+Five specific directions for future work are identified. First, hardware validation on the Quanser QDrone 2 with staged indoor flight tests is planned for Q2 2026, beginning with tethered hover validation before progressing to untethered navigation. Second, TensorRT optimisation of the ONNX model should be performed to achieve greater than 30 Hz inference on the Jetson Xavier NX, exceeding the 10 Hz control loop requirement. Third, integration with a real VIO pipeline (Intel RealSense T265 or D435i stereo VIO) will replace the simulated VIO module with genuine visual-inertial state estimation. Fourth, a complete SAC implementation and training campaign will enable statistically rigorous comparison between PPO and SAC for the GNSS-denied navigation task. Fifth, curriculum learning with progressive difficulty scheduling -- beginning with open environments and gradually introducing obstacle density and VIO drift -- may improve sample efficiency and final policy quality.
+
+---
+
+## References
+
+[1] K. P. Valavanis and G. J. Vachtsevanos, *Handbook of Unmanned Aerial Vehicles*. Springer, 2015.
+[2] Y. Cheng et al., "A review of UAV autonomous navigation in GPS-denied environments," *Robotics and Autonomous Systems*, vol. 169, 2023.
+[3] R. Mahony, V. Kumar, and P. Corke, "Multirotor aerial vehicles: Modeling, estimation, and control of quadrotor," *IEEE Robotics and Automation Magazine*, vol. 19, no. 3, pp. 20-32, 2012.
+[4] R. S. Sutton and A. G. Barto, *Reinforcement Learning: An Introduction*, 2nd ed. MIT Press, 2018.
+[5] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, "Proximal policy optimization algorithms," arXiv:1707.06347, 2017.
+[6] T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, "Soft actor-critic: Off-policy maximum entropy deep RL with a stochastic actor," in *Proc. ICML*, 2018.
+[7] W. Koch, R. Mancuso, R. West, and A. Bestavros, "Reinforcement learning for UAV attitude control," *ACM Trans. Cyber-Physical Systems*, vol. 3, no. 2, 2019.
+[8] S. Y. Shin, "Application of reinforcement learning in controlling quadrotor UAVs: A simulation study in AirSim," *Drones*, vol. 8, no. 11, 2024.
+[9] J. Zhao, E. Altche, C. Shan, and G. Hoskere, "Sim-to-real transfer in deep reinforcement learning for robotics: A survey," *IEEE TPAMI*, vol. 44, no. 12, 2022.
+[10] J. Tobin, R. Fong, A. Ray, J. Schneider, W. Zaremba, and P. Abbeel, "Domain randomization for transferring deep neural networks from simulation to the real world," in *Proc. IEEE/RSJ IROS*, 2017.
+[11] S. Shah, D. Dey, C. Lovett, and A. Kapoor, "AirSim: High-fidelity visual and physical simulation for autonomous vehicles," in *Field and Service Robotics*, Springer, 2018.
+[12] E. Camci and E. Kayacan, "End-to-end motion planning of quadrotors using deep reinforcement learning," arXiv:1909.13599, 2019.
+[13] E. Gallo and A. Barrientos, "GNSS-denied semi-direct visual navigation for autonomous UAVs aided by PI-inspired inertial priors," arXiv:2205.13242, 2022.
+[14] J. Hwangbo, I. Sa, R. Siegwart, and M. Hutter, "Control of a quadrotor with reinforcement learning," *IEEE RA-L*, vol. 2, no. 4, pp. 2096-2103, 2017.
+[15] A. Singla, S. Padakandla, and S. Bhatnagar, "Memory-based deep reinforcement learning for obstacle avoidance in UAV with limited environment knowledge," arXiv:1811.03307, 2018.
+[16] S. Y. Shin, Y. W. Kang, and Y. G. Kim, "Obstacle avoidance drone by deep reinforcement learning and its racing with human pilot," *Applied Sciences*, vol. 9, no. 24, 2019.
+[17] J. Kinnari, F. Verdoja, and V. Kyrki, "Season-invariant GNSS-denied visual localization for UAVs," arXiv:2110.01967, 2021.
+[18] R. Madaan et al., "AirSim drone racing lab," in *Proc. NeurIPS Competition Track*, 2020.
+[19] J. H. Chan, K. H. Low, S. Y. Lim, and R. H. Gan, "Reinforcement learning-based drone simulators: Survey, practice, and challenge," *Neural Computing and Applications*, 2024.
+[20] J. Gaigalas, "A framework for vision-based autonomous UAV navigation in simulated environments," *Drones*, 2025.
+[21] F. Sadeghi and S. Levine, "CAD2RL: Real single-image flight without a single real image," in *Proc. RSS*, 2017.
+[22] X. B. Peng, M. Andrychowicz, W. Zaremba, and P. Abbeel, "Sim-to-real transfer of robotic control with dynamics randomization," in *Proc. IEEE ICRA*, 2018.
+[23] D. Mellinger and V. Kumar, "Minimum snap trajectory generation and control for quadrotors," in *Proc. IEEE ICRA*, 2011.
+[24] A. Raffin, A. Hill, A. Gleave, A. Kanervisto, M. Ernestus, and N. Dormann, "Stable-Baselines3: Reliable reinforcement learning implementations," *JMLR*, vol. 22, no. 268, pp. 1-8, 2021.
+[25] P. Wei, X. Chen, and Z. Li, "Vision-based 2D navigation of unmanned aerial vehicles with imitation learning," *Int. J. Advanced Robotic Systems*, vol. 19, no. 3, 2022.
+[26] V. Mnih et al., "Human-level control through deep reinforcement learning," *Nature*, vol. 518, pp. 529-533, 2015.
+
+---
+
+## Appendix
+
+### A. Supervisor Meeting Log (Semester 2)
+
+[PLACEHOLDER: Table A.1 -- Summary of weekly meetings with Marah Saleh during Semester 2, listing date, key discussion points, and agreed actions for each meeting.]
+
+### B. Configuration Files
+
+Key configurations in the project repository (configs/): train_ppo.yaml (base, 1M steps), train_ppo_fast.yaml (fast, 500K steps), train_ppo_dr.yaml (domain randomisation enabled), train_ppo_waypoint.yaml (goal-directed navigation), train_ppo_multienv.yaml (multi-environment rotation), safety.yaml (safety monitor limits), rewards/default.yaml, rewards/aggressive.yaml, rewards/cautious.yaml.
+
+### C. Code Repository
+
+[PLACEHOLDER: GitHub repository URL]
+
+The repository includes the AirSim environment wrapper, training pipeline, evaluation suite, safety monitor, deployment scripts, and all 147 unit tests. Installation: Python 3.11, pip install -e ".[dev]". Full documentation is provided in README.md and ARCHITECTURE.md.

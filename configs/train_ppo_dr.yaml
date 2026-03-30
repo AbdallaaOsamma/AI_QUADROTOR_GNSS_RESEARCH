@@ -30,6 +30,9 @@ domain_randomization:
   vio_drift_std_per_step: 0.01
   vio_bias_std: 0.005
   flow_noise_std: 0.03
+  wind_max_ms: 2.0            # Max horizontal wind component per axis (m/s)
+  motor_lag_tau: [0.05, 0.15] # Per-episode motor lag time constant range (s)
+  depth_clip_jitter: 2.0      # ±jitter on depth clip range per episode (m)
 
 ppo:
   learning_rate: 3.0e-4

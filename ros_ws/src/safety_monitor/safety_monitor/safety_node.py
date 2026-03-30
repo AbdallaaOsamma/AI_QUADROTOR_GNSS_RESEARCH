@@ -18,25 +18,27 @@ Run: ros2 run safety_monitor safety_node
 
 import numpy as np
 
+try:
+    # Available when running from the project root with src/ on the path
+    from src.safety.roi_utils import centre_roi_min_depth as _centre_roi_min_depth
+except ImportError:
+    # Fallback for ROS2 colcon builds where src/ is not on sys.path
+    def _centre_roi_min_depth(depth_m: np.ndarray, roi_frac: float = 0.3) -> float:
+        h, w = depth_m.shape[:2]
+        r0 = int(h * (1 - roi_frac) / 2)
+        r1 = int(h * (1 + roi_frac) / 2)
+        c0 = int(w * (1 - roi_frac) / 2)
+        c1 = int(w * (1 + roi_frac) / 2)
+        roi = depth_m[r0:r1, c0:c1]
+        return float(roi.min()) if roi.size > 0 else float("inf")
+
 
 # Safety defaults — overridable via ROS2 parameters
 _DEFAULT_MAX_VX = 3.0  # m/s
 _DEFAULT_MAX_VY = 1.0  # m/s
 _DEFAULT_MAX_YAW_RATE = 45.0  # deg/s
 _PROXIMITY_THRESH_M = 1.5  # metres — trigger proximity braking
-_PROXIMITY_ROI_FRAC = 0.3  # centre 30% of image for ROI
 _PROXIMITY_SCALE = 0.2  # scale vx to this fraction when obstacle close
-
-
-def _centre_roi_min_depth(depth_m: np.ndarray) -> float:
-    """Return minimum depth (metres) in the centre 30% ROI of a depth image."""
-    h, w = depth_m.shape[:2]
-    r0 = int(h * (1 - _PROXIMITY_ROI_FRAC) / 2)
-    r1 = int(h * (1 + _PROXIMITY_ROI_FRAC) / 2)
-    c0 = int(w * (1 - _PROXIMITY_ROI_FRAC) / 2)
-    c1 = int(w * (1 + _PROXIMITY_ROI_FRAC) / 2)
-    roi = depth_m[r0:r1, c0:c1]
-    return float(roi.min()) if roi.size > 0 else float("inf")
 
 
 def apply_safety(
@@ -62,7 +64,10 @@ def apply_safety(
     if depth_m is not None and vx > 0:
         min_depth = _centre_roi_min_depth(depth_m)
         if min_depth < _PROXIMITY_THRESH_M:
-            vx *= _PROXIMITY_SCALE
+            # Linear interpolation: at threshold → scale=1.0, at 0m → scale=_PROXIMITY_SCALE
+            t = max(0.0, min_depth / _PROXIMITY_THRESH_M)
+            scale = _PROXIMITY_SCALE + t * (1.0 - _PROXIMITY_SCALE)
+            vx *= scale
 
     return vx, vy, yaw_rate
 
@@ -134,6 +139,12 @@ class SafetyNode:
             self._latest_depth = np.frombuffer(
                 msg.data, dtype=np.float32
             ).reshape(msg.height, msg.width)
+        else:
+            self._node.get_logger().warning(
+                f"safety_monitor: unsupported depth encoding '{msg.encoding}' — "
+                "resetting depth to zeros — assuming obstacle at 0m, proximity braking active"
+            )
+            self._latest_depth = np.zeros((msg.height, msg.width), dtype=np.float32)
 
     def _estop_cb(self, msg):
         self._estop = msg.data

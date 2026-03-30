@@ -31,6 +31,7 @@ def test_depth_cb_normalizes_16uc1():
     """_depth_cb decodes 16UC1 and normalizes: 5000mm -> 5m -> 5/20 = 0.25."""
     fake_self = MagicMock()
     fake_self.IMAGE_SIZE = 84
+    fake_self._depth_clip_m = 20.0
     fake_self._frame_buffer = deque(
         [np.zeros((84, 84, 1), dtype=np.float32)] * 4, maxlen=4
     )
@@ -43,7 +44,10 @@ def test_depth_cb_normalizes_16uc1():
     msg.width = 84
     msg.data = raw.tobytes()
 
-    _mod.InferenceNode._depth_cb(fake_self, msg)
+    # cv2 may be a MagicMock in the test environment; make resize return a
+    # proper numpy array so the normalization math is exercised correctly.
+    with patch.object(_mod.cv2, "resize", return_value=np.full((84, 84), 5.0, dtype=np.float32)):
+        _mod.InferenceNode._depth_cb(fake_self, msg)
 
     last = fake_self._frame_buffer[-1]
     assert last.shape == (84, 84, 1)

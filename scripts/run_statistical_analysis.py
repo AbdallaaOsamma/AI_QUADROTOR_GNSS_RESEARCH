@@ -20,7 +20,7 @@ import os
 import warnings
 
 import numpy as np
-from scipy.stats import f_oneway, ttest_rel
+from scipy.stats import f_oneway, ttest_ind
 
 
 # Pairs of run subdirectory names to compare with paired t-tests.
@@ -33,17 +33,26 @@ COMPARISON_PAIRS = [
 
 
 def load_episode_summaries(eval_dir: str) -> list[dict]:
-    """Load all episode summary JSON files from a directory (recursive).
+    """Load per-episode summary dicts from a directory (recursive).
+
+    Handles two output formats produced by ``run_full_eval.py``:
+
+    1. **Aggregate** (``eval_summary.json``): a single JSON object with an
+       ``episode_summaries`` list — each element is one episode's metrics.
+    2. **Per-episode JSON** (``episode_*.json``): one JSON file per episode,
+       each containing a single episode summary dict.
+
+    Both formats may coexist; duplicates are not de-duplicated.
 
     Parameters
     ----------
     eval_dir:
-        Path to directory (or nested subdirectory) containing ``*.json`` files.
+        Path to directory (or nested subdirectory) to search.
 
     Returns
     -------
     list[dict]
-        Parsed JSON objects, one per file found.
+        Flat list of per-episode summary dicts.
     """
     pattern = os.path.join(eval_dir, "**", "*.json")
     paths = glob.glob(pattern, recursive=True)
@@ -51,9 +60,24 @@ def load_episode_summaries(eval_dir: str) -> list[dict]:
     for p in sorted(paths):
         try:
             with open(p, encoding="utf-8") as fh:
-                summaries.append(json.load(fh))
+                data = json.load(fh)
         except (json.JSONDecodeError, OSError) as exc:
             print(f"[WARN] Could not load {p}: {exc}")
+            continue
+
+        if isinstance(data, dict) and "episode_summaries" in data:
+            # Aggregate eval_summary.json — unpack the per-episode list
+            eps = data["episode_summaries"]
+            if isinstance(eps, list):
+                summaries.extend(eps)
+            else:
+                print(f"[WARN] {p}: 'episode_summaries' is not a list, skipping")
+        elif isinstance(data, dict):
+            # Legacy per-episode JSON — treat the whole object as one episode
+            summaries.append(data)
+        else:
+            print(f"[WARN] {p}: unexpected JSON type {type(data).__name__}, skipping")
+
     return summaries
 
 
@@ -118,12 +142,17 @@ def run_anova(*groups: np.ndarray) -> dict:
 
 
 def run_paired_ttest(a: np.ndarray, b: np.ndarray) -> dict:
-    """Paired t-test between two equal-length arrays.
+    """Independent-samples t-test comparing two groups.
+
+    Uses Welch's t-test (equal_var=False) which does not assume equal
+    population variances and handles unequal sample sizes correctly.
+    This is appropriate for comparing independently-trained RL runs where
+    episode-level pairing has no statistical meaning.
 
     Parameters
     ----------
     a, b:
-        1-D arrays of paired observations (must be the same length).
+        1-D arrays of observations (may have different lengths).
 
     Returns
     -------
@@ -131,16 +160,7 @@ def run_paired_ttest(a: np.ndarray, b: np.ndarray) -> dict:
         ``{"statistic": float, "p_value": float, "significant_at_0.05": bool,
            "mean_a": float, "mean_b": float, "mean_diff": float}``
     """
-    if len(a) != len(b):
-        n = min(len(a), len(b))
-        warnings.warn(
-            f"run_paired_ttest: arrays have unequal lengths ({len(a)} vs {len(b)}), "
-            f"truncating to {n} pairs. Pairing validity may be compromised.",
-            stacklevel=2,
-        )
-        a = a[:n]
-        b = b[:n]
-    stat, p_val = ttest_rel(a, b)
+    stat, p_val = ttest_ind(a, b, equal_var=False)
     return {
         "statistic": float(stat),
         "p_value": float(p_val),
@@ -246,24 +266,20 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # 3. Paired t-tests for known comparison pairs                        #
     # ------------------------------------------------------------------ #
-    print(f"\n--- Paired t-Tests ({args.metric}) ---")
+    print(f"\n--- Independent-Samples t-Tests ({args.metric}) ---")
     for name_a, name_b in COMPARISON_PAIRS:
         if name_a not in groups or name_b not in groups:
             print(f"  [SKIP] ({name_a}, {name_b}) — one or both runs not found.")
             continue
         a = groups[name_a]
         b = groups[name_b]
-        # Trim to same length for paired test
-        n = min(len(a), len(b))
-        if n < 2:
-            print(f"  [SKIP] ({name_a}, {name_b}) — fewer than 2 paired observations.")
+        if len(a) < 2 or len(b) < 2:
+            print(f"  [SKIP] ({name_a}, {name_b}) — fewer than 2 observations in one group.")
             continue
-        if len(a) != len(b):
-            print(f"  [WARN] ({name_a}, {name_b}) — unequal sample sizes "
-                  f"({len(a)} vs {len(b)}), truncating to {n} pairs.")
-        ttest_result = run_paired_ttest(a[:n], b[:n])
+        ttest_result = run_paired_ttest(a, b)
         ttest_result["pair"] = f"{name_a}_vs_{name_b}"
-        ttest_result["n_pairs"] = n
+        ttest_result["n_a"] = int(len(a))
+        ttest_result["n_b"] = int(len(b))
         results["paired_ttests"].append(ttest_result)
         sig = "**SIGNIFICANT**" if ttest_result["significant_at_0.05"] else "not significant"
         print(f"  ({name_a} vs {name_b})  t={ttest_result['statistic']:.4f}  "

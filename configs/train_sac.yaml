@@ -26,7 +26,7 @@ sac:
   ent_coef: "auto"          # Entropy coefficient (auto-tuned)
   total_timesteps: 500000
 
-frame_stack: 4              # Temporal frame stacking
+frame_stack: 1              # Single-frame (matches best PPO ablation result for fair comparison)
 
 output:
   log_dir: "logs/sac"

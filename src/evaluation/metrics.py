@@ -22,8 +22,8 @@ def distance_before_collision(trajectory: list[dict]) -> float:
         if prev is not None:
             total += math.sqrt((x - prev[0]) ** 2 + (y - prev[1]) ** 2)
         prev = (x, y)
-        # Collision detected by large negative reward
-        if row.get("reward", 0) < -50:
+        # Collision detected by explicit flag or large negative reward fallback
+        if row.get("has_collided", False) or row.get("reward", 0) < -50:
             break
     return total
 
@@ -53,9 +53,11 @@ def average_speed(trajectory: list[dict], dt: float = 0.1) -> float:
 
 
 def path_smoothness(trajectory: list[dict], dt: float = 0.1) -> float:
-    """Mean absolute jerk (m/s^3) — lower is smoother.
+    """Mean acceleration magnitude (m/s²) — lower is smoother.
 
-    Computed from velocity changes across consecutive steps.
+    Computed as the mean of |Δv/Δt| across consecutive steps, where v is
+    estimated from position differences.  This measures acceleration, not jerk
+    (which would require a further finite difference).  Units: m/s².
     """
     if len(trajectory) < 3:
         return 0.0
@@ -220,7 +222,7 @@ def compute_episode_summary(
     summary = {
         "distance_before_collision_m": round(distance_before_collision(trajectory), 2),
         "average_speed_ms": round(average_speed(trajectory, dt), 3),
-        "path_smoothness_jerk": round(path_smoothness(trajectory, dt), 3),
+        "path_smoothness_accel_ms2": round(path_smoothness(trajectory, dt), 3),
         "survival_time_s": round(survival_time(trajectory, dt), 2),
         "localisation_drift_mean_m": localisation_drift(trajectory),
         "collided": collided,

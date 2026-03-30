@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Presentation Guide — AI Quadrotor FYP</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #222; background: #fafafa; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #1a1a2e; padding-bottom: 10px; font-size: 2em; }
+  h2 { color: #16213e; border-bottom: 2px solid #e74c3c; padding-bottom: 6px; margin-top: 50px; font-size: 1.5em; }
+  h3 { color: #0f3460; margin-top: 30px; font-size: 1.2em; }
+  h4 { color: #e74c3c; margin-top: 20px; }
+  blockquote { background: #fff3cd; border-left: 5px solid #ffc107; margin: 20px 0; padding: 15px 20px; border-radius: 4px; font-style: italic; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.9em; color: #c0392b; }
+  pre { background: #1e1e2e; color: #cdd6f4; padding: 20px; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.6; }
+  pre code { background: none; color: #cdd6f4; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+  th { background: #1a1a2e; color: white; padding: 10px 14px; text-align: left; }
+  td { padding: 8px 14px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) { background: #f2f2f2; }
+  .pitch { background: #e8f5e9; border: 2px solid #4caf50; padding: 20px; border-radius: 8px; font-size: 1.1em; margin: 20px 0; }
+  .warning { background: #fff3e0; border-left: 5px solid #ff9800; padding: 15px; margin: 15px 0; }
+  .section-divider { border: none; border-top: 3px solid #1a1a2e; margin: 60px 0; }
+  .qa-q { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 12px 18px; margin-top: 30px; font-weight: bold; font-size: 1.05em; }
+  .qa-a { background: #f9fbe7; border-left: 5px solid #8bc34a; padding: 12px 18px; margin-bottom: 10px; }
+  .toc { background: #f0f4ff; border: 1px solid #c5cae9; padding: 20px; border-radius: 8px; margin: 30px 0; }
+  .toc a { color: #1a1a2e; text-decoration: none; display: block; padding: 3px 0; }
+  .toc a:hover { color: #e74c3c; }
+  .footer { text-align: center; margin-top: 80px; color: #888; font-style: italic; border-top: 1px solid #ddd; padding-top: 20px; }
+</style>
+</head>
+<body>
+
+<h1>Panel Presentation Guide</h1>
+<p><strong>AI-Augmented Quadrotor Flight Control in GNSS-Denied Environments</strong><br>
+Heriot-Watt University Dubai — Final Year Project</p>
+
+<blockquote>This document is your complete reference. Read it, absorb it, and rephrase it in your own words. Every section is written as spoken language so you can rehearse it out loud.</blockquote>
+
+<div class="toc">
+<strong>Contents</strong>
+<a href="#pitch">Quick Reference — 30-Second Pitch</a>
+<a href="#s1">Section 1 — The Problem: Why Does This Project Exist?</a>
+<a href="#s2">Section 2 — Our Solution at a High Level</a>
+<a href="#s3">Section 3 — The Simulation Environment: Microsoft AirSim</a>
+<a href="#s4">Section 4 — The Observation Pipeline: What the Drone Perceives</a>
+<a href="#s5">Section 5 — The Reward Function: Teaching the Drone What "Good" Means</a>
+<a href="#s6">Section 6 — Why Reinforcement Learning?</a>
+<a href="#s7">Section 7 — Why PPO Specifically?</a>
+<a href="#s8">Section 8 — The Neural Network Architecture: NatureCNN + MLP Late Fusion</a>
+<a href="#s9">Section 9 — Domain Randomization: Bridging Sim and Reality</a>
+<a href="#s10">Section 10 — Training Infrastructure</a>
+<a href="#s11">Section 11 — The Safety Monitor</a>
+<a href="#s12">Section 12 — Sim-to-Real Transfer</a>
+<a href="#s13">Section 13 — Evaluation Metrics and Ablation Studies</a>
+<a href="#s14">Section 14 — Python Code and Every Dependency Explained</a>
+<a href="#s15">Section 15 — Tough Panel Q&amp;A: 12 Prepared Answers</a>
+<a href="#appendix">Appendix — Quick Reference Numbers and File Map</a>
+</div>
+
+<hr class="section-divider">
+
+<h2 id="pitch">QUICK REFERENCE — 30-Second Pitch</h2>
+
+<div class="pitch">
+"My project teaches a drone to navigate autonomously in environments where GPS is unavailable — such as indoors, underground, or in areas where GPS signals are jammed. Instead of programming it with rigid rules, I used Reinforcement Learning: an AI technique where the drone learns by trial and error in a realistic flight simulator. After millions of practice flights in simulation, the drone develops a control policy — a decision-making brain — that can navigate around obstacles using only a depth camera and velocity sensors, with no GPS at all. The goal is to produce a policy that can eventually be transferred to a real drone."
+</div>
+
+<hr class="section-divider">
+
+<h2 id="s1">SECTION 1 — THE PROBLEM: WHY DOES THIS PROJECT EXIST?</h2>
+
+<h3>What is GNSS-Denied?</h3>
+<p>GNSS stands for Global Navigation Satellite System — the family of technologies that includes GPS (American), GLONASS (Russian), Galileo (European), and BeiDou (Chinese). All modern autonomous drones rely on GNSS to know where they are, where they're going, and how to correct their flight path.</p>
+<p>The problem: GNSS signals are extremely weak radio waves that travel from satellites 20,000 km away. They are easy to lose and easy to disrupt:</p>
+<ul>
+<li><strong>Indoors:</strong> Satellite signals cannot penetrate concrete buildings. Any indoor drone is immediately blind.</li>
+<li><strong>Underground:</strong> Tunnels, mines, subway systems — zero GPS.</li>
+<li><strong>Urban canyons:</strong> Tall buildings reflect and scatter GPS signals (multipath error), making position estimates unreliable in dense cities.</li>
+<li><strong>Electronic jamming:</strong> A cheap GPS jammer (available online) can deny GPS to all drones within hundreds of metres. This is a serious military and security concern.</li>
+<li><strong>Contested environments:</strong> Military operations, search and rescue in disaster zones, or inspection of metal structures — all require navigation without GPS.</li>
+</ul>
+
+<h3>Why Existing Solutions Fail</h3>
+<p>Today's commercial drones — DJI, Parrot, and others — simply fall back to "position hold" mode when GPS is lost. If signal is not recovered quickly, they land (or crash). There is no autonomous navigation capability without GPS.</p>
+<p>Some drones carry pre-built maps and try to match their camera feed against those maps (Visual-Inertial Odometry, VIO). This works in known environments but fails the moment the drone encounters a space it has never seen before. It also requires extensive pre-mapping, which is impossible in disaster response or military scenarios.</p>
+
+<h3>The Core Question This Project Answers</h3>
+<blockquote>Can a drone learn — through experience in a simulator — to navigate through unknown spaces using only a depth camera and inertial sensing, with no GPS whatsoever?</blockquote>
+<p>Our answer is yes. And we use Reinforcement Learning to achieve it.</p>
+
+<hr class="section-divider">
+
+<h2 id="s2">SECTION 2 — OUR SOLUTION AT A HIGH LEVEL</h2>
+
+<p>We built a complete software system that trains a drone's "brain" entirely inside a physics simulator called Microsoft AirSim. The brain is a deep neural network — a mathematical function with millions of adjustable parameters — that takes as input what the drone can see (a depth image from a forward-facing camera) and what the drone can feel (its velocity in body-frame coordinates from simulated inertial sensors). The network outputs velocity commands: how fast to fly forward, sideways, and how fast to rotate. The network is trained using Proximal Policy Optimisation (PPO), a Reinforcement Learning algorithm that improves the network by rewarding good behaviour (flying forward without crashing) and penalising bad behaviour (collisions, jerky motion). After millions of training steps across randomised environments, the network converges on a control policy that navigates reliably without GPS. The trained policy is then exported in the ONNX format for deployment on physical drone hardware.</p>
+
+<hr class="section-divider">
+
+<h2 id="s3">SECTION 3 — THE SIMULATION ENVIRONMENT: MICROSOFT AIRSIM</h2>
+
+<h3>What is AirSim?</h3>
+<p>AirSim (Aerial Informatics and Robotics Simulation) is an open-source drone and car simulator built by Microsoft Research on top of Unreal Engine 4. It provides:</p>
+<ul>
+<li>Photorealistic rendering (important for visual realism)</li>
+<li>Accurate physics simulation (aerodynamics, motor thrust, drag, collisions)</li>
+<li>A Python API for sending flight commands and receiving sensor data</li>
+</ul>
+<p>Think of it as a video game engine repurposed for robotics research. Instead of a player controlling the drone with a joystick, our Python code sends velocity commands and reads back camera images and sensor data.</p>
+
+<h3>Why Not Train on a Real Drone?</h3>
+<ol>
+<li><strong>Safety:</strong> A learning drone crashes constantly in early training. You cannot do this with a real drone without destroying it within minutes.</li>
+<li><strong>Speed:</strong> Training requires ~1 million flight steps. At 10 Hz, that is 100,000 seconds of flight time. Simulation can be parallelised and runs faster than real time.</li>
+<li><strong>Reproducibility:</strong> In simulation, we can reset to identical starting conditions and run controlled experiments.</li>
+</ol>
+
+<h3>Lockstep Mode — Why It Matters</h3>
+<p>We use <strong>lockstep mode</strong>: the simulation is paused after every control step. The sequence is:</p>
+<pre><code>PAUSE simulation
+Send velocity command
+RESUME simulation for exactly dt = 0.1 seconds
+PAUSE simulation again
+Read sensors (depth image, velocity)</code></pre>
+
+<p>From <code>src/environments/airsim_env.py</code>, lines 405–417:</p>
+<pre><code>self.client.moveByVelocityZBodyFrameAsync(...)   # Send command to drone
+self.client.simContinueForTime(self.dt)           # Run physics for exactly 0.1s
+self.client.simPause(True)                        # Pause again — wait for Python</code></pre>
+
+<p>The result is perfectly deterministic training — the same random seed always produces the same trajectory. This is essential for reproducible science.</p>
+
+<h3>Episode Reset — Starting Each Training Flight</h3>
+<p>Each episode reset sequence (lines 351–393):</p>
+<ol>
+<li>Unpause the simulation (blocking calls fail on a paused sim)</li>
+<li>Call <code>client.reset()</code> to wipe the drone's state</li>
+<li>Use <code>simSetVehiclePose(ignore_collision=True)</code> to teleport the drone to spawn position</li>
+<li>Enable API control, arm the motors, take off</li>
+<li>Fly to target altitude (3 m)</li>
+<li>Record current collision timestamp — to filter stale collision flags later</li>
+<li>Re-enter lockstep mode: <code>simPause(True)</code></li>
+<li>Apply domain randomization</li>
+</ol>
+
+<hr class="section-divider">
+
+<h2 id="s4">SECTION 4 — THE OBSERVATION PIPELINE: WHAT THE DRONE PERCEIVES</h2>
+
+<h3>The Sensor Philosophy: No GPS, No Maps</h3>
+<p>A human pilot navigating without GPS uses two senses: vision (what is in front of me?) and proprioception (what is my body doing?). Our drone does exactly the same. Its observation — the information fed to the neural network at every time step — consists of exactly two things:</p>
+<ol>
+<li>A depth camera image (vision)</li>
+<li>A velocity vector in body frame (proprioception)</li>
+</ol>
+<p>Nothing else. No GPS coordinates. No pre-built map. No ground truth position.</p>
+
+<h3>Depth Camera vs RGB — Why Depth?</h3>
+<table>
+<tr><th>Property</th><th>Depth Camera</th><th>RGB Camera</th></tr>
+<tr><td>Works in darkness?</td><td>Yes (uses infrared)</td><td>No</td></tr>
+<tr><td>Affected by wall colour?</td><td>No</td><td>Yes — identical walls look different</td></tr>
+<tr><td>Directly measures distance?</td><td>Yes</td><td>No — requires learned inference</td></tr>
+<tr><td>Sim-to-real gap</td><td>Small</td><td>Large (simulated RGB ≠ real RGB)</td></tr>
+</table>
+
+<h3>Image Processing Pipeline (lines 200–221)</h3>
+<pre><code>responses = self.client.simGetImages([
+    airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False)
+])
+img1d = np.array(responses[0].image_data_float, dtype=np.float32)
+img_depth = img1d.reshape(height, width)
+img_depth = cv2.resize(img_depth, (84, 84))        # Resize to 84x84
+img_depth = np.clip(img_depth, 0, 20.0) / 20.0    # Clip at 20m, normalise to [0,1]
+# Add sensor noise if domain randomization enabled:
+noise = np.random.normal(0, 0.02, img_depth.shape)
+img_depth = np.clip(img_depth + noise, 0.0, 1.0)</code></pre>
+
+<p><strong>Why 84×84?</strong> This is the established size from DeepMind's Atari DQN work. Small enough for fast GPU processing, large enough to capture spatial structure (corridors, obstacles). Higher resolution gives diminishing returns at much higher compute cost.</p>
+
+<h3>Frame Stacking — Giving the Drone Memory</h3>
+<p>A single depth frame is a photograph — it shows WHERE things are but not HOW they move. We stack the last 4 frames together:</p>
+<ul>
+<li>Shape goes from <code>(84, 84, 1)</code> to <code>(84, 84, 4)</code></li>
+<li>The network can compare consecutive frames to infer motion (like optical flow)</li>
+<li>Essential for dynamic obstacle avoidance</li>
+</ul>
+<p><strong>Analogy:</strong> Catching a thrown ball. From a single photograph, you cannot determine its trajectory. Watch four frames in sequence, and the trajectory becomes obvious.</p>
+<pre><code># In train.py, line 252:
+train_env = VecFrameStack(train_env, n_stack=4, channels_order="last")</code></pre>
+
+<h3>Body-Frame Velocity (lines 223–250)</h3>
+<p><strong>Why body frame?</strong> The drone cannot know its world-frame velocity without GPS — it doesn't know which direction is "north." But it CAN measure how fast it is moving relative to itself (body frame) using an IMU. This is the key insight: we only use sensors that work without GPS.</p>
+<pre><code>v_global = [vx_world, vy_world, vz_world]   # From AirSim physics
+yaw = euler_angles(orientation)[2]            # Drone's current heading
+R_yaw = [[cos(-yaw), -sin(-yaw), 0],
+          [sin(-yaw),  cos(-yaw), 0],
+          [0,          0,         1]]
+v_body = R_yaw @ v_global                     # Rotate to body frame
+# Output: [vx_forward, vy_lateral, yaw_rate]</code></pre>
+
+<h3>SimulatedVIO — Realistic Drift (lines 27–60)</h3>
+<p>Real VIO systems accumulate error over time. We simulate this with <code>SimulatedVIO</code>:</p>
+<pre><code>def update(self, gt_velocity):
+    self._accumulated_drift += random.normal(0, drift_std, 3)  # Grows each step
+    return gt_velocity + self._accumulated_drift + self._bias  # Biased + drifting estimate</code></pre>
+
+<h3>The Complete Observation Space</h3>
+<pre><code>observation_space = Dict({
+    "image":    Box(0.0, 1.0, shape=(84, 84, 4)),  # 4 stacked depth frames
+    "velocity": Box(-inf, inf,  shape=(3,))         # [vx, vy, yaw_rate] in body frame
+})</code></pre>
+
+<hr class="section-divider">
+
+<h2 id="s5">SECTION 5 — THE REWARD FUNCTION: TEACHING THE DRONE WHAT "GOOD" MEANS</h2>
+
+<h3>The Reward Signal</h3>
+<p>RL works like training a dog: good behaviour gets a reward, bad behaviour gets a penalty. Over millions of repetitions, the agent learns to take actions that maximise its accumulated reward. We cannot hand-write a rule for every situation — instead we define a reward function that SCORES behaviour at every step, and let the algorithm figure out the rules.</p>
+
+<h3>Component 1 — Progress Reward</h3>
+<pre><code>reward_progress = 0.5 × vx_body</code></pre>
+<p>If the drone flies forward at 3 m/s → reward = +1.5 per step. Hovering → reward = 0. Flying backward → small negative. <strong>Why:</strong> directly incentivises the primary goal — moving through the environment.</p>
+
+<h3>Component 2 — Collision Penalty</h3>
+<pre><code>reward_collision = -100    (episode ends immediately)
+# Collision detection with stale-flag filtering (lines 429-433):
+has_collided = (col_info.has_collided and col_info.time_stamp != self._last_col_ts)</code></pre>
+<p><strong>Why -100?</strong> The agent perceives crashing as catastrophically worse than slow/cautious flight. Without this, the agent would learn to fly at maximum speed into walls. The stale-flag filtering prevents false collisions from the previous episode contaminating the current one.</p>
+
+<h3>Component 3 — Smoothness Penalty</h3>
+<pre><code>reward_smoothness = -0.1 × ||action_t - action_{t-1}||</code></pre>
+<p>Penalises sudden changes in velocity commands. <strong>ME analogy:</strong> Smooth driving uses less fuel and causes less mechanical wear than repeatedly flooring the accelerator and braking hard. The smoothness penalty teaches the drone the equivalent of smooth throttle control — which also produces better sim-to-real transfer because real actuators cannot execute instantaneous velocity jumps.</p>
+
+<h3>Component 4 — VIO Drift Penalty (DR config)</h3>
+<pre><code>reward_drift = -0.1 × drift_error    # drift_error = |VIO_position - true_position|</code></pre>
+<p>When domain randomization is enabled, an additional penalty proportional to accumulated VIO position error teaches the agent to take actions that minimise estimation error.</p>
+
+<h3>The Full Reward Formula</h3>
+<pre><code>reward = (0.5 × vx_body)
+       + (-100 if collision else 0)
+       + (-0.1 × ||action_t - action_{t-1}||)
+       + (-0.1 × drift_error)   # only with DR enabled</code></pre>
+
+<hr class="section-divider">
+
+<h2 id="s6">SECTION 6 — WHY REINFORCEMENT LEARNING?</h2>
+
+<h3>Why Not PID?</h3>
+<p>As a Mechanical Engineer, you know PID well. PID is an excellent feedback controller for well-defined setpoint tracking problems. It fails here for three reasons:</p>
+<ol>
+<li><strong>No setpoint:</strong> Without GPS, we cannot define a position setpoint. PID cannot navigate without knowing "here" and "target."</li>
+<li><strong>No perception:</strong> PID has no awareness of obstacles. Obstacle avoidance requires a separate, hand-engineered perception stack on top of PID — an ever-growing pile of rules.</li>
+<li><strong>No adaptation:</strong> PID gains are tuned for a specific drone model. Change the payload, air density, or motor wear, and the controller degrades.</li>
+</ol>
+<p><strong>The PID controller in this project</strong> (<code>src/control/pid.py</code>) exists only as a baseline comparison for evaluation — to show what rule-based control achieves vs what RL achieves.</p>
+
+<h3>Why Not Supervised Learning?</h3>
+<ol>
+<li><strong>No training data:</strong> You would need expert pilots to fly through hundreds of different environments — every obstacle configuration, every corridor width. This does not exist.</li>
+<li><strong>Distribution shift:</strong> Even with expert data, the model only works on situations that look like the training data. Any novel scenario causes failure.</li>
+<li><strong>Cannot exceed the expert:</strong> Imitation learning can only be as good as the demonstrations. RL can discover strategies better than any human expert.</li>
+</ol>
+
+<h3>Why Not Model-Based Planning?</h3>
+<p>Model-based control builds an explicit world model and plans paths through it (A*, RRT). This requires a pre-built map. In GNSS-denied unknown environments, there is no map. Real-time SLAM is computationally expensive and fails in featureless environments.</p>
+
+<h3>Why RL Wins</h3>
+<p>RL requires no labelled data, no pre-built map, and no accurate dynamics model. It learns from experience — trial, error, and reward.</p>
+
+<p><strong>The RL Loop:</strong></p>
+<pre><code>1. Drone observes current state (depth image + velocity)
+2. Neural network (the "policy") outputs an action (velocity command)
+3. Action is executed in simulation
+4. Environment computes reward (+good, -bad)
+5. Reward signal adjusts the neural network's weights
+6. Repeat from step 1, one million times</code></pre>
+
+<p><strong>Why RL generalises:</strong> Because we use domain randomization, the agent trains across thousands of different starting positions, obstacle configurations, and sensor noise levels. It learns a STRATEGY, not a specific path.</p>
+
+<hr class="section-divider">
+
+<h2 id="s7">SECTION 7 — WHY PPO SPECIFICALLY?</h2>
+
+<h3>What is a "Policy"?</h3>
+<p>A policy is a mathematical function: <code>policy(observation) → action</code>. It maps what the drone perceives to what the drone should do. The policy is a neural network — the RL algorithm's job is to find the network weights that make this function as good as possible.</p>
+
+<h3>What is Gradient Descent?</h3>
+<p>Neural network training uses gradient descent. The "loss" is how bad the policy currently is. The gradient is the direction of steepest improvement. We take small steps in that direction.</p>
+<p><strong>ME analogy:</strong> You are blindfolded on a hilly landscape, trying to reach the lowest valley. You feel the slope underfoot (the gradient) and take a step downhill. Repeat, and you converge to the valley. If you take too large a step, you overshoot the valley and end up on the other side of a hill — WORSE than before. This is the catastrophic update problem that PPO solves.</p>
+
+<h3>Algorithm Comparison</h3>
+<table>
+<tr><th>Algorithm</th><th>Action Space</th><th>Key Problem</th><th>Verdict</th></tr>
+<tr><td>DQN</td><td>Discrete only</td><td>Cannot produce continuous velocity commands</td><td>Wrong tool entirely</td></tr>
+<tr><td>DDPG / TD3</td><td>Continuous</td><td>Off-policy, brittle, hyperparameter-sensitive</td><td>Too risky for Phase 1</td></tr>
+<tr><td>REINFORCE</td><td>Both</td><td>Extremely high gradient variance, slow convergence</td><td>Too unstable</td></tr>
+<tr><td>SAC</td><td>Continuous</td><td>More complex entropy tuning, but excellent</td><td>Phase 2 comparison target</td></tr>
+<tr><td><strong>PPO</strong></td><td><strong>Continuous</strong></td><td><strong>None for this use case</strong></td><td><strong>Chosen — stable, proven</strong></td></tr>
+</table>
+
+<h3>PPO's Key Innovation — The Clipped Objective</h3>
+<pre><code>ratio = new_policy_probability / old_policy_probability
+objective = min(ratio × advantage, clip(ratio, 0.8, 1.2) × advantage)</code></pre>
+<p>At each update, PPO is <em>not allowed</em> to change the policy by more than 20% (clip_range = 0.2). This is a hard constraint that prevents catastrophic updates.</p>
+<p><strong>ME analogy:</strong> Adjusting a control valve. You calculated that opening it by 80% maximises flow — but doing it that fast would surge and break the system. So you impose a rule: maximum 20% change per adjustment. Next adjustment, another 20% closer to optimal. PPO is this rule, applied to neural network weight updates.</p>
+
+<h3>Key Hyperparameters (from configs/train_ppo.yaml)</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Plain-English Meaning</th></tr>
+<tr><td>learning_rate</td><td>3×10⁻⁴</td><td>How large each gradient step is — small enough for stability</td></tr>
+<tr><td>n_steps</td><td>2048</td><td>Collect 2048 environment steps before each policy update</td></tr>
+<tr><td>n_epochs</td><td>10</td><td>Reuse each batch of data for 10 update passes</td></tr>
+<tr><td>clip_range</td><td>0.2</td><td>Maximum 20% policy change per update — the PPO constraint</td></tr>
+<tr><td>gamma</td><td>0.99</td><td>Discount: future rewards are valued at 99% of immediate rewards</td></tr>
+<tr><td>gae_lambda</td><td>0.95</td><td>Generalised Advantage Estimation — reduces gradient variance</td></tr>
+<tr><td>ent_coef</td><td>0.01</td><td>Entropy bonus — encourages exploration, prevents premature convergence</td></tr>
+<tr><td>total_timesteps</td><td>1,000,000</td><td>Total environment steps for a full training run</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<h2 id="s8">SECTION 8 — THE NEURAL NETWORK ARCHITECTURE</h2>
+
+<h3>What is a Neural Network, From Scratch?</h3>
+<p>A neural network is a mathematical function with adjustable parameters (weights). Each layer takes inputs, multiplies them by weights, sums them, applies a non-linear function (ReLU: max(0, x)), and passes to the next layer.</p>
+<p><strong>ME analogy:</strong> Think of it as a very complex transfer function. Input goes in, emerges transformed through many stages, producing an output. The difference: the parameters ADAPT through training to produce the desired input-output relationship.</p>
+<p>Why non-linear functions? A sequence of purely linear operations collapses to a single linear transformation, no matter how many layers. Non-linearities give neural networks the power to represent complex mappings like "navigate around obstacles."</p>
+
+<h3>CNN — Convolutional Neural Network</h3>
+<p>A CNN uses sliding filter windows that scan across an image looking for patterns. Each filter becomes a "feature detector" — one might detect edges, another open corridors. The CNN learns WHICH patterns are important during training.</p>
+
+<h3>NatureCNN — The Architecture We Use</h3>
+<p>NatureCNN is from DeepMind's 2015 paper "Human-level control through deep reinforcement learning" — the same architecture that learned to play 49 Atari video games from pixels alone.</p>
+<pre><code>Input: (84, 84, 4)  ← 4 stacked depth frames
+  ↓
+Conv2D(32 filters, 8×8 kernel, stride 4)   ← large-scale features
+  ↓ ReLU
+Conv2D(64 filters, 4×4 kernel, stride 2)   ← medium-scale features
+  ↓ ReLU
+Conv2D(64 filters, 3×3 kernel, stride 1)   ← fine-grained features
+  ↓ ReLU
+Flatten → Linear(512)
+  ↓
+Output: 512-dimensional image feature vector</code></pre>
+
+<h3>MLP for Velocity</h3>
+<p>The velocity observation <code>[vx, vy, yaw_rate]</code> is just 3 numbers. It has no spatial structure — no need for convolutions. A simple fully connected (MLP) network processes it:</p>
+<pre><code>Input: (3,)  ← [vx, vy, yaw_rate]
+  ↓ Linear(64) → ReLU
+Output: 64-dimensional velocity feature vector</code></pre>
+
+<h3>Late Fusion — Why Combine at the End?</h3>
+<p><strong>Early fusion</strong>: mix raw pixels and velocity numbers before processing. Problem: the CNN expects to slide spatial filters over image data. Mixing in velocity numbers at the pixel level breaks this spatial interpretation.</p>
+<p><strong>Late fusion</strong>: process each modality completely separately, THEN concatenate at a semantic level. The two feature vectors (spatial features + motion features) are concatenated and fed to the actor and critic heads.</p>
+
+<pre><code>Image (84,84,4) → NatureCNN → 512-dim vector ─┐
+                                                 ├─ Concatenate (576-dim)
+Velocity (3,) → MLP → 64-dim vector  ──────────┘
+                                                 ↓
+                                      Actor head → action (velocity command)
+                                      Critic head → value estimate (training only)</code></pre>
+
+<h3>MultiInputPolicy — The stable-baselines3 Name</h3>
+<p><code>MultiInputPolicy</code> is stable-baselines3's name for a policy that accepts a Dict observation space. It automatically routes image observations through NatureCNN and non-image observations through MLP, then performs late fusion. Specified in <code>train.py</code> line 161:</p>
+<pre><code>cls("MultiInputPolicy", env=env, tensorboard_log=log_dir, ...)</code></pre>
+
+<hr class="section-divider">
+
+<h2 id="s9">SECTION 9 — DOMAIN RANDOMIZATION: BRIDGING SIM AND REALITY</h2>
+
+<h3>The Sim-to-Real Gap</h3>
+<p>When you train in simulation and deploy on real hardware, the policy often fails. This is the sim-to-real gap — the difference between simulation's idealised world and reality's imperfect one:</p>
+<ul>
+<li>Simulated depth: perfect. Real depth: noisy, dead pixels, reflections.</li>
+<li>Simulated physics: exact. Real physics: motor vibration, wear, non-linearity.</li>
+<li>Simulated VIO: perfect velocity. Real VIO: drift and bias accumulation.</li>
+</ul>
+<p>If the policy learns to exploit simulation-specific artefacts (perfect readings, fixed spawn point), it fails the moment those artefacts disappear in reality.</p>
+
+<h3>Domain Randomization — Training on Uncertainty</h3>
+<p><strong>Military analogy:</strong> Train soldiers in mud and rain — not just controlled indoor ranges. Build soldiers who perform under any conditions. Domain randomization is this principle applied to drone training.</p>
+
+<h3>What We Randomise (lines 161–195, configs/train_ppo_dr.yaml)</h3>
+<pre><code>domain_randomization:
+  enabled: true
+  depth_noise_std: 0.02        # Gaussian noise on normalised depth image
+  spawn_radius_m: 5.0          # Random start position within 5m radius
+  vio_enabled: true
+  vio_drift_std_per_step: 0.01 # Accumulated VIO drift per step (m/s)
+  vio_bias_std: 0.005          # Constant per-episode IMU bias (m/s)
+  flow_noise_std: 0.02         # Per-step optical flow perturbation</code></pre>
+
+<h4>1. Depth Sensor Noise</h4>
+<pre><code>noise = np.random.normal(0, 0.02, img_depth.shape)
+img_depth = np.clip(img_depth + noise, 0.0, 1.0)</code></pre>
+<p>Simulates real Intel RealSense sensor noise (±2% of full range per pixel).</p>
+
+<h4>2. Spawn Position Jitter</h4>
+<pre><code>dx = uniform(-5, 5);  dy = uniform(-5, 5)
+random_yaw = uniform(-π, π)
+client.simSetVehiclePose(Pose(Vector3r(dx, dy, -3.0), quaternion(yaw)), ignore_collision=True)</code></pre>
+<p>The agent never starts at the same place — it must learn a general navigation strategy, not memorise a path.</p>
+
+<h4>3. VIO Drift and Bias</h4>
+<p>See SimulatedVIO class above. Each episode gets a new random bias, different drift rate — simulating different IMU calibration states on different drones.</p>
+
+<h3>What is Not Yet Done (Planned Phase 2+)</h3>
+<ul>
+<li>Physics DR: varying mass, inertia, motor gain per episode</li>
+<li>Wind disturbances via AirSim weather API</li>
+<li>Visual degradation: simulated fog, motion blur</li>
+</ul>
+
+<hr class="section-divider">
+
+<h2 id="s10">SECTION 10 — TRAINING INFRASTRUCTURE</h2>
+
+<h3>YAML Configuration System</h3>
+<p>Every hyperparameter lives in a YAML file under <code>configs/</code>. Nothing is hardcoded. This is critical for reproducibility — any experiment can be recreated exactly by re-running the same config.</p>
+
+<h3>Parallel Environments — SubprocVecEnv (lines 102–114)</h3>
+<pre><code># N independent Python subprocesses, each with own AirSim instance:
+env_fns = [make_env(cfg, port=base_port + i) for i in range(num_envs)]
+return SubprocVecEnv(env_fns, start_method="spawn")
+# Result: N× data collection speed</code></pre>
+<p>With N=4 parallel environments, training is ~4× faster. <code>start_method="spawn"</code> creates fresh processes (not <code>fork</code>) to avoid CUDA memory corruption.</p>
+
+<h3>VecFrameStack — Automatic Frame Stacking</h3>
+<pre><code>train_env = VecFrameStack(train_env, n_stack=4, channels_order="last")</code></pre>
+<p>This wrapper manages the sliding window of 4 frames for ALL parallel environments automatically. Every <code>step()</code> call shifts the window and returns the stacked observation.</p>
+
+<h3>Training Callbacks (lines 265–291)</h3>
+<table>
+<tr><th>Callback</th><th>Trigger</th><th>Purpose</th></tr>
+<tr><td>CheckpointCallback</td><td>Every 10,000 steps</td><td>Save .zip model snapshot — enables resume from interruption</td></tr>
+<tr><td>EvalCallback</td><td>Every 5,000 steps</td><td>5 deterministic eval episodes; save best model seen so far</td></tr>
+<tr><td>RewardLoggingCallback</td><td>Every episode</td><td>Log individual reward components to TensorBoard</td></tr>
+</table>
+
+<h3>TensorBoard — Live Training Visualisation</h3>
+<pre><code>tensorboard --logdir logs/ppo/</code></pre>
+<p>Plots reward curves, loss curves, FPS, individual reward components in real time in a browser. Essential for debugging whether training is converging.</p>
+
+<h3>EnvironmentScheduler — Multi-Environment Rotation</h3>
+<pre><code>env_scheduler = EnvironmentScheduler.from_config_paths(
+    ["configs/environments/airsim_nh.yaml",   # Outdoor NH map
+     "configs/environments/blocks.yaml"],       # Indoor blocks map
+    rotate_every_episodes=50                   # Switch every 50 episodes
+)</code></pre>
+<p>Rotating environments forces the policy to learn features that generalise across different room layouts, preventing overfitting to one specific geometry.</p>
+
+<hr class="section-divider">
+
+<h2 id="s11">SECTION 11 — THE SAFETY MONITOR</h2>
+
+<h3>Why Safety is a Separate Module</h3>
+<p>The RL policy is a learned function that can fail on inputs outside its training distribution. The safety monitor is a <strong>deterministic, rule-based filter</strong> that sits between the RL policy and the flight controller, operating only during deployment.</p>
+<p><strong>Architecture:</strong> RL Policy → velocity command → Safety Monitor → safe command → Flight Controller</p>
+<p><strong>ME analogy:</strong> ABS + stability control in a modern car. The driver (RL) decides direction and throttle; the safety system intervenes to prevent wheel lock or dangerous speeds. The driver's intent is preserved, but dangerous commands are overridden.</p>
+
+<h3>The Four Safety Layers (safety_node.py, lines 42–67)</h3>
+<pre><code>def apply_safety(vx, vy, yaw_rate, depth_m, estop, ...):
+    # Layer 0: Emergency stop — HIGHEST PRIORITY
+    if estop:
+        return 0.0, 0.0, 0.0
+
+    # Layer 1: Velocity clamping
+    vx       = clip(vx,       -3.0, 3.0)   # Never exceed 3 m/s forward
+    vy       = clip(vy,       -1.0, 1.0)   # Never exceed 1 m/s lateral
+    yaw_rate = clip(yaw_rate, -45°/s, 45°/s)
+
+    # Layer 2: Proximity braking
+    if depth_m is not None and vx > 0:
+        min_depth = centre_roi_min_depth(depth_m)  # Min depth in centre 30%
+        if min_depth < 1.5:                         # Obstacle closer than 1.5m
+            vx *= 0.2                               # Reduce forward speed to 20%
+
+    return vx, vy, yaw_rate</code></pre>
+
+<table>
+<tr><th>Layer</th><th>Trigger</th><th>Action</th></tr>
+<tr><td>Emergency Stop</td><td>/estop signal, comms timeout</td><td>Zero ALL commands immediately</td></tr>
+<tr><td>Velocity Clamp</td><td>Always</td><td>Hard-limit to physical bounds</td></tr>
+<tr><td>Proximity Braking</td><td>Centre 30% depth &lt; 1.5m and vx &gt; 0</td><td>Scale forward speed to 20%</td></tr>
+<tr><td>Altitude Guard</td><td>Altitude deviation &gt; 1.0m</td><td>Flag warning (future: return-to-alt)</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<h2 id="s12">SECTION 12 — SIM-TO-REAL TRANSFER</h2>
+
+<h3>ONNX Export — The Universal Model Format</h3>
+<p>ONNX (Open Neural Network Exchange) is a standardised format for neural network models — like a PDF for AI models. It captures architecture and weights in a hardware-agnostic format supported by every major platform.</p>
+<p><code>scripts/export_onnx.py</code>: Load the trained stable-baselines3 .zip → extract PyTorch network → trace computation graph → export to .onnx. On deployment hardware, <code>onnxruntime</code> runs inference at full speed without requiring PyTorch or stable-baselines3.</p>
+
+<h3>Planned Hardware Stack (Phase 3)</h3>
+<table>
+<tr><th>Component</th><th>Role</th></tr>
+<tr><td>Nvidia Jetson Xavier NX</td><td>Onboard computer: RL inference, ROS2, safety monitor</td></tr>
+<tr><td>Intel RealSense D435i</td><td>Depth camera — same modality as simulation training</td></tr>
+<tr><td>Pixhawk 6C</td><td>Flight controller running PX4 — low-level motor control</td></tr>
+<tr><td>MAVLink</td><td>Communication protocol between Jetson and Pixhawk</td></tr>
+<tr><td>ROS2</td><td>Middleware connecting all components</td></tr>
+</table>
+
+<h3>Deployment Data Flow</h3>
+<pre><code>RealSense D435i → depth image (ROS2)
+                         ↓
+              rl_inference node (ONNX on Jetson)
+                         ↓
+         velocity command (ROS2: /drone/cmd_vel)
+                         ↓
+              safety_monitor node
+                         ↓
+       safe command (ROS2: /drone/cmd_vel_safe)
+                         ↓
+       MAVLink bridge → Pixhawk 6C → Motors</code></pre>
+
+<hr class="section-divider">
+
+<h2 id="s13">SECTION 13 — EVALUATION METRICS AND ABLATION STUDIES</h2>
+
+<h3>The 5 Evaluation Metrics (src/evaluation/metrics.py)</h3>
+<table>
+<tr><th>Metric</th><th>Function</th><th>What It Measures</th></tr>
+<tr><td>Success rate</td><td>goal_completion_rate()</td><td>Fraction of waypoints reached per episode</td></tr>
+<tr><td>Collision rate</td><td>collision_rate()</td><td>Fraction of episodes ending in collision</td></tr>
+<tr><td>Navigation efficiency</td><td>average_speed()</td><td>Mean forward speed — higher is better if collision-free</td></tr>
+<tr><td>Path smoothness</td><td>path_smoothness()</td><td>RMS jerk of action trajectory — lower is better</td></tr>
+<tr><td>Localisation drift</td><td>localisation_drift()</td><td>Accumulated VIO position error vs ground truth</td></tr>
+</table>
+<p>Each episode produces a summary via <code>compute_episode_summary()</code>. Results across 20 evaluation episodes are averaged with standard deviations.</p>
+
+<h3>The 7 Ablation Experiments (scripts/run_ablations.py)</h3>
+<p>An ablation study removes ONE component at a time and measures performance impact. This PROVES each component contributes — and quantifies how much.</p>
+
+<table>
+<tr><th>Experiment</th><th>What Changes</th><th>Hypothesis Tested</th></tr>
+<tr><td>no_smoothness</td><td>w_smoothness = 0.0</td><td>Does smoothness penalty improve real-world deployability?</td></tr>
+<tr><td>progress_only</td><td>w_collision=0, w_smoothness=0</td><td>Is progress reward alone sufficient for safe navigation?</td></tr>
+<tr><td>frame_stack_1</td><td>frame_stack = 1</td><td>Does temporal information (4 vs 1 frames) improve obstacle avoidance?</td></tr>
+<tr><td>no_dr</td><td>domain_randomization.enabled = false</td><td>Does DR improve generalisation to novel environments?</td></tr>
+<tr><td>no_vio_noise</td><td>VIO drift disabled</td><td>Does simulated VIO error make the policy more robust?</td></tr>
+<tr><td>spawn_only</td><td>Spawn jitter only, no sensor noise</td><td>Which DR component contributes most to generalisation?</td></tr>
+<tr><td>noise_only</td><td>Sensor noise only, no spawn jitter</td><td>Which DR component contributes most to sensor robustness?</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<h2 id="s14">SECTION 14 — PYTHON CODE AND EVERY DEPENDENCY EXPLAINED</h2>
+
+<table>
+<tr><th>Library</th><th>Version</th><th>What It Does</th><th>Why This One</th></tr>
+<tr><td>airsim</td><td>1.8.1</td><td>Python SDK for communicating with AirSim simulator. Every client.xxx() call sends/receives data from the simulator process over a network socket.</td><td>Only SDK for AirSim — required by design choice of simulator</td></tr>
+<tr><td>torch (PyTorch)</td><td>latest</td><td>Deep learning framework. Provides GPU-accelerated tensor computation and automatic differentiation (backpropagation). The neural network lives here.</td><td>More intuitive API than TensorFlow. Required by stable-baselines3.</td></tr>
+<tr><td>gymnasium</td><td>latest</td><td>Standard RL environment interface. Defines reset(), step(), observation_space, action_space. Our AirSimDroneEnv inherits from gym.Env.</td><td>"USB standard" of RL — any SB3 algorithm plugs into any Gymnasium environment</td></tr>
+<tr><td>stable-baselines3</td><td>latest</td><td>Production-quality RL algorithm implementations (PPO, SAC, A2C, etc.). Handles the entire training loop, gradient updates, and policy architecture.</td><td>Correct PPO implementation requires weeks of work. SB3 provides tested, benchmarked implementations.</td></tr>
+<tr><td>tensorboard</td><td>latest</td><td>Browser-based training visualisation. Plots reward curves, loss curves, custom scalars in real time.</td><td>Essential for monitoring whether training is converging or diverging</td></tr>
+<tr><td>msgpack-rpc-python</td><td>latest</td><td>Binary serialisation protocol. AirSim uses MessagePack-RPC internally for Python-to-simulator communication. Handles encoding/decoding network packets.</td><td>Required by airsim SDK — not called directly by our code</td></tr>
+<tr><td>numpy</td><td>latest</td><td>N-dimensional array operations. Every depth image, velocity vector, and reward calculation uses numpy arrays. Foundation of all scientific computing in Python.</td><td>The universal substrate — no alternative for numerical Python</td></tr>
+<tr><td>opencv-python (cv2)</td><td>latest</td><td>Computer vision library. Used for cv2.resize() to scale depth images to 84×84 with correct interpolation.</td><td>Optimised, hardware-accelerated image resizing</td></tr>
+<tr><td>onnx / onnxruntime</td><td>latest</td><td>ONNX: universal neural network format. onnxruntime: high-performance inference engine. Used for model export and deployment.</td><td>Hardware-agnostic deployment — runs on Jetson without PyTorch</td></tr>
+<tr><td>pyyaml</td><td>latest</td><td>YAML file reader. yaml.safe_load() converts config files to Python dictionaries.</td><td>Standard YAML library — simple and reliable</td></tr>
+<tr><td>pytest</td><td>latest</td><td>Unit testing framework. Runs all 58 tests that verify modules work correctly without AirSim.</td><td>Most popular Python testing framework — rich ecosystem</td></tr>
+<tr><td>ruff</td><td>latest</td><td>Python linter and formatter. Checks code style, catches unused imports and potential bugs.</td><td>100× faster than flake8/pylint — written in Rust</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<h2 id="s15">SECTION 15 — TOUGH PANEL Q&amp;A: 12 PREPARED ANSWERS</h2>
+<p><em>Use these as starting points. Rephrase in your own words. Confidence matters as much as content.</em></p>
+
+<div class="qa-q">Q1: "Why not just fix the GPS or use better GPS?"</div>
+<div class="qa-a">GPS is an externally-dependent, infrastructure-based system. Even the best GPS is unavailable indoors, underground, and in electronically contested environments. Modern GPS jammers cost less than £50 and can deny GPS to all drones within hundreds of metres. Military adversaries routinely jam GPS in conflict zones. Better GPS hardware does not solve these fundamental limitations — the signal physically cannot penetrate concrete, and jamming is a trivial attack. The only robust solution for autonomous operation in these environments is onboard sensing that requires no external infrastructure. Our system uses exactly that.</div>
+
+<div class="qa-q">Q2: "How is this better than a PID controller?"</div>
+<div class="qa-a">A PID controller is excellent for well-defined setpoint tracking. But it has three fundamental limitations here. First, without GPS we cannot define a position setpoint — PID cannot navigate when it doesn't know where it is. Second, PID has no obstacle perception — it would fly straight into walls without a separate, hand-engineered avoidance system on top. Third, PID is tuned for one specific drone model and does not adapt to changes in payload, air density, or motor wear. Our RL policy learns from experience across thousands of scenarios, incorporates visual obstacle perception directly, and produces an adaptive control strategy that generalises to unseen environments. PID is a hammer; this problem is a screw.</div>
+
+<div class="qa-q">Q3: "What is the sim-to-real gap, and how do you address it?"</div>
+<div class="qa-a">The sim-to-real gap is the difference between idealised simulation and messy reality. In simulation: depth images are perfect, physics is exact, sensors have no noise. In reality: depth cameras have noise and dead pixels, motors vibrate, IMUs drift. A policy trained on perfect simulation often fails on real hardware because it learned to rely on simulation-specific artefacts. We address this with domain randomization — deliberately adding noise and variation during training so the policy learns behaviours robust to imperfection. Additionally, we chose depth (not RGB) because simulated depth images look much more like real depth images. Finally, ONNX export ensures the trained model runs identically on any target hardware.</div>
+
+<div class="qa-q">Q4: "Why depth camera and not RGB?"</div>
+<div class="qa-a">Three reasons. First, depth is lighting-invariant — it uses infrared and works in darkness, bright sunlight, or flickering light, where RGB fails. Second, depth is texture-invariant — consistent readings for walls regardless of colour or pattern, so the policy doesn't need to learn "red walls and white walls are both obstacles." Third, and most critically for this project, the sim-to-real gap for depth is far smaller than for RGB. Simulated depth images look qualitatively similar to real RealSense images. Simulated RGB looks nothing like real images — wrong colours, textures, lighting. Choosing depth was a deliberate architectural decision to maximise sim-to-real transferability.</div>
+
+<div class="qa-q">Q5: "What does frame stacking give you that a single frame doesn't?"</div>
+<div class="qa-a">A single depth frame is a snapshot — it shows where obstacles are, not how they or the drone are moving. Consider catching a thrown ball: from a single photograph, you cannot determine its trajectory. Watch four frames, and the trajectory is obvious. Our drone faces the same problem: to predict whether it is on a collision course, it needs the rate of change of obstacle positions relative to itself. Four stacked frames provide this temporal information. The neural network learns to compare consecutive frames and detect motion — effectively computing optical flow internally without an explicit calculation. Remove frame stacking (one of our ablation experiments), and we expect the collision rate to increase measurably.</div>
+
+<div class="qa-q">Q6: "Why PPO over SAC? SAC is often said to be more sample-efficient."</div>
+<div class="qa-a">SAC is more sample-efficient — it reuses experience from a replay buffer. But sample efficiency is not our primary constraint — we generate experience cheaply in simulation. Our primary constraint is training stability. PPO's clipped objective guarantees no catastrophic policy updates — the policy cannot change by more than 20% in any update. SAC is more sensitive to hyperparameter choices, particularly the entropy coefficient. For Phase 1 infrastructure building and validation, PPO's stability was the correct engineering trade-off. SAC is deliberately planned for Phase 2: once PPO results are established, we run the same evaluation protocol on SAC and apply ANOVA and paired t-tests to determine if any performance difference is statistically significant.</div>
+
+<div class="qa-q">Q7: "What would happen without domain randomization?"</div>
+<div class="qa-a">Without DR, the policy trains on perfect sensor readings, a fixed spawn position, and zero VIO drift. It would likely learn to exploit simulation-specific artefacts — always expecting a perfect depth image, always starting at exactly the same position. In evaluation in a different environment or on real hardware, those assumptions are violated. The most likely failure mode: the policy navigates perfectly in the training scenario but crashes immediately in any other room layout. This is overfitting to the training distribution. Domain randomization prevents this by forcing the policy to learn robust, generalised strategies rather than environment-specific shortcuts. That's why we have dedicated ablation experiments to quantify exactly how much DR contributes to generalisation.</div>
+
+<div class="qa-q">Q8: "How do you know your reward function is correct?"</div>
+<div class="qa-a">Reward function design is the hardest part of applied RL, and I'll be honest that "correct" is a high bar. We validate it three ways. First, theoretical reasoning: each component has a clear causal link to desired behaviour — progress reward encourages movement, collision penalty enforces safety, smoothness penalty promotes deployability. Second, ablation studies: we remove each component and measure performance. If removing the smoothness penalty produces measurably higher action jerk, the penalty was doing its job. Third, reward sweep experiments: we train with three weight profiles (default, aggressive, cautious) to understand sensitivity to specific values. We don't claim it is optimal — reward engineering is an active research area. We claim it is motivated, justified, and empirically tested.</div>
+
+<div class="qa-q">Q9: "What are the limitations of your approach?"</div>
+<div class="qa-a">I'll be direct about four key limitations. First, we have not yet run the full training campaigns — results in this presentation are from infrastructure validation. Second, our VIO pipeline is simulated, not real — we inject synthetic drift into ground-truth velocity, which is a simplification of a real VIO system. Third, our domain randomization covers sensor noise and spawn jitter but not physics parameters — we don't vary mass, inertia, or motor characteristics per episode. Fourth, the hardware prototype has not been built — ONNX export exists but the complete MAVLink/ROS2 integration and physical flight testing are Phase 3 work. These are documented known limitations that define our post-FYP roadmap.</div>
+
+<div class="qa-q">Q10: "What's next after the FYP?"</div>
+<div class="qa-a">Five clear next steps: Run the full training campaigns — 1M steps for PPO, then SAC, collect evaluation metrics for comparison. Implement SAC and run the PPO-vs-SAC comparison with statistical analysis (ANOVA, paired t-tests). Complete physics domain randomization — varying mass, inertia, and motor parameters per episode. Replace the simulated VIO with a real VIO pipeline in the simulator loop, enabling proper localisation drift evaluation. Build the physical hardware prototype and attempt sim-to-real transfer using the ONNX-exported policy on the Jetson Xavier NX.</div>
+
+<div class="qa-q">Q11: "What is PPO's clipped objective in simple terms?"</div>
+<div class="qa-a">Think of adjusting a control valve. You calculated that opening it by 80% maximises flow — but doing it that fast would surge and break the system. So you impose a rule: maximum 20% change per adjustment cycle. Next adjustment, another 20% closer to optimal. PPO is this rule applied to neural network weight updates. At each training step, PPO calculates how much to change the policy. If the change exceeds 20%, it is clipped to exactly 20%. This prevents catastrophically large policy updates — which could suddenly make the drone fly dangerously — and ensures training remains stable over one million steps.</div>
+
+<div class="qa-q">Q12: "Why 84×84 pixels? Why not higher resolution?"</div>
+<div class="qa-a">84×84 is the resolution established by DeepMind's Atari DQN paper in 2015 and validated across hundreds of visual RL tasks since. For navigation, the relevant information in a depth image is: where are the open spaces, where are the walls, how wide is the corridor? This spatial information is fully captured at 84×84. Going to 256×256 increases the input size by nine times, the convolutional processing cost by nine times, and slows training significantly — with negligible benefit for a navigation task. We also configured AirSim's camera to output 84×84 directly in settings_training.json, eliminating the resizing overhead entirely. It is a deliberate engineering decision: the minimum resolution that preserves navigation-relevant features at maximum training speed.</div>
+
+<hr class="section-divider">
+
+<h2 id="appendix">APPENDIX — QUICK REFERENCE</h2>
+
+<h3>Key Numbers to Know</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Why</th></tr>
+<tr><td>Image size</td><td>84 × 84 px</td><td>Proven RL visual resolution (DeepMind Atari)</td></tr>
+<tr><td>Frame stack</td><td>4 frames</td><td>Temporal motion information</td></tr>
+<tr><td>Max forward speed</td><td>3.0 m/s</td><td>Safe navigation speed</td></tr>
+<tr><td>Max lateral speed</td><td>1.0 m/s</td><td>Obstacle dodging</td></tr>
+<tr><td>Max yaw rate</td><td>45 °/s</td><td>Turning speed</td></tr>
+<tr><td>Control frequency</td><td>10 Hz (dt=0.1s)</td><td>Matches real flight controller rates</td></tr>
+<tr><td>Max episode steps</td><td>1024</td><td>~102 seconds of flight</td></tr>
+<tr><td>Target altitude</td><td>3.0 m</td><td>Above ground-clutter, below ceiling</td></tr>
+<tr><td>Progress reward weight</td><td>+0.5</td><td>Per m/s of forward velocity</td></tr>
+<tr><td>Collision penalty</td><td>-100</td><td>Catastrophic — dominates all other rewards</td></tr>
+<tr><td>Smoothness penalty</td><td>-0.1</td><td>Per unit of action change</td></tr>
+<tr><td>Training steps</td><td>1,000,000</td><td>Full baseline run</td></tr>
+<tr><td>Depth clip distance</td><td>20 m</td><td>Beyond this, irrelevant for navigation decisions</td></tr>
+<tr><td>VIO drift std/step</td><td>0.01 m/s</td><td>Realistic IMU drift rate</td></tr>
+<tr><td>Proximity brake threshold</td><td>1.5 m</td><td>Safety monitor trigger distance</td></tr>
+<tr><td>Proximity brake scale</td><td>0.2×</td><td>Reduce vx to 20% near obstacles</td></tr>
+<tr><td>PPO clip range</td><td>0.2</td><td>Maximum 20% policy change per update</td></tr>
+<tr><td>Learning rate</td><td>3×10⁻⁴</td><td>Standard for PPO with Adam optimiser</td></tr>
+<tr><td>Gamma (discount)</td><td>0.99</td><td>Values future rewards at 99% of immediate</td></tr>
+<tr><td>Tests passing</td><td>58 / 58</td><td>All unit tests green</td></tr>
+</table>
+
+<h3>File Map — Where Is Everything?</h3>
+<table>
+<tr><th>What</th><th>Where</th></tr>
+<tr><td>The environment (drone interface)</td><td>src/environments/airsim_env.py</td></tr>
+<tr><td>The reward function</td><td>src/environments/rewards.py</td></tr>
+<tr><td>The training script</td><td>src/training/train.py</td></tr>
+<tr><td>Training callbacks</td><td>src/training/callbacks.py</td></tr>
+<tr><td>Multi-env rotation</td><td>src/training/env_scheduler.py</td></tr>
+<tr><td>Evaluation metrics</td><td>src/evaluation/metrics.py</td></tr>
+<tr><td>Safety monitor (ROS2)</td><td>ros_ws/src/safety_monitor/safety_monitor/safety_node.py</td></tr>
+<tr><td>PID baseline controller</td><td>src/control/pid.py</td></tr>
+<tr><td>VIO simulation</td><td>src/environments/airsim_env.py (SimulatedVIO class)</td></tr>
+<tr><td>Base training config</td><td>configs/train_ppo.yaml</td></tr>
+<tr><td>Domain randomization config</td><td>configs/train_ppo_dr.yaml</td></tr>
+<tr><td>Reward weights</td><td>configs/rewards/default.yaml</td></tr>
+<tr><td>Ablation runner</td><td>scripts/run_ablations.py</td></tr>
+<tr><td>ONNX export script</td><td>scripts/export_onnx.py</td></tr>
+<tr><td>All unit tests</td><td>tests/</td></tr>
+</table>
+
+<div class="footer">
+  <p>Panel Presentation Guide — AI Quadrotor FYP — Heriot-Watt University Dubai</p>
+  <p><em>Read every section at least twice. Practice saying it out loud. You built this — own it.</em></p>
+</div>
+
+</body>
+</html>

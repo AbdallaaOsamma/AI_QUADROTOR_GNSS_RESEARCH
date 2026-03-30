@@ -21,6 +21,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
 
 from src.environments.airsim_env import AirSimDroneEnv
 from src.safety.monitor import SafetyMonitor
+from src.safety.roi_utils import centre_roi_min_depth
 
 
 def make_env(cfg: dict):
@@ -30,25 +31,13 @@ def make_env(cfg: dict):
 
 
 def _get_center_roi_min_depth(raw_env: AirSimDroneEnv) -> float:
-    """Extract minimum depth from center 30% ROI of depth image.
-
-    Uses the last captured depth image from the environment state.
-    """
+    """Extract minimum depth (metres) from centre 30% ROI of depth image."""
     depth_img = raw_env.state["image"]
     if depth_img is None or depth_img.size == 0:
         return float("inf")
-
-    h, w = depth_img.shape[:2]
-    margin_h = int(h * 0.35)
-    margin_w = int(w * 0.35)
-    center_roi = depth_img[margin_h:h - margin_h, margin_w:w - margin_w]
-
-    if center_roi.size == 0:
-        return float("inf")
-
-    # Use 5th-percentile instead of min to discard bad pixels (drone body artifacts)
-    min_normalized = float(np.percentile(center_roi, 5))
-    return min_normalized * raw_env.depth_clip_m
+    # depth_img is normalized [0, 1]; convert to metres before the shared utility
+    depth_m = depth_img.astype(np.float32) * raw_env.depth_clip_m
+    return centre_roi_min_depth(depth_m)
 
 
 def main():

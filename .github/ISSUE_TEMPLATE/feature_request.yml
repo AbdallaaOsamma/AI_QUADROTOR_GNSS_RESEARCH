@@ -1,0 +1,58 @@
+name: Feature Request
+description: Suggest a new feature or research direction
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea that would improve the research or the codebase? We'd love to hear it.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New RL algorithm
+        - Domain randomization improvement
+        - Observation / sensor modality
+        - Reward function
+        - Evaluation metric
+        - Safety mechanism
+        - Training infrastructure
+        - Visualization / analysis
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this feature needed? What problem does it solve?
+      placeholder: "Currently, the VIO pipeline uses ground-truth kinematics. A realistic optical-flow estimator would..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature and how it would work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative approaches?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: willing-to-implement
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to implement this feature and open a PR

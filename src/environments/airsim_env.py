@@ -74,8 +74,12 @@ class AirSimDroneEnv(gym.Env):
         self._dr_cfg = cfg.get("domain_randomization", {})
         self._vio_enabled = self._dr_cfg.get("vio_enabled", False)
         self._vio: SimulatedVIO | None = None
+        self._depth_noise_std = 0.0  # set by _apply_domain_randomization; 0 = no noise
         self._flow_noise_std = 0.0
         self._vio_pos_est = np.zeros(2, dtype=np.float32)  # [x_est, y_est] integrated from VIO vel
+        # Motor lag (first-order low-pass on commanded velocity)
+        self._tau_motor = 0.0  # 0 = no lag (disabled unless DR sets it)
+        self._cmd_vel_filtered = np.zeros(3, dtype=np.float32)  # [vx, vy, yaw_rate] filtered
 
         self.ip = env_cfg.get("ip", "")
         self.port = env_cfg.get("port", 41451)
@@ -87,6 +91,7 @@ class AirSimDroneEnv(gym.Env):
         self.dt = env_cfg.get("dt", 0.1)
         self.max_steps = env_cfg.get("max_steps", 1024)
         self.depth_clip_m = env_cfg.get("depth_clip_m", 20.0)
+        self._depth_clip_base = self.depth_clip_m  # base value; per-episode jitter applied on top
 
         # Goal navigation (backward-compatible — off by default)
         self.goal_navigation = env_cfg.get("goal_navigation", False)
@@ -155,6 +160,11 @@ class AirSimDroneEnv(gym.Env):
         self.max_steps = env_cfg.get("max_steps", self.max_steps)
         self.depth_clip_m = env_cfg.get("depth_clip_m", self.depth_clip_m)
 
+        # Clear stale delta-distance state so the first step after a config
+        # rotation doesn't produce a spurious distance reward from the old layout.
+        if hasattr(self.reward_fn, "_prev_dist_norm"):
+            self.reward_fn._prev_dist_norm = None
+
     # ------------------------------------------------------------------
     # Domain Randomization
     # ------------------------------------------------------------------
@@ -165,6 +175,13 @@ class AirSimDroneEnv(gym.Env):
         Controlled via `domain_randomization` key in config YAML.
         """
         if not self._dr_cfg.get("enabled", False):
+            # Reset noise levels so a rotation from DR-enabled → DR-disabled
+            # config (via EnvironmentScheduler) stops applying noise.
+            self._depth_noise_std = 0.0
+            self._flow_noise_std = 0.0
+            self._tau_motor = 0.0
+            self._cmd_vel_filtered = np.zeros(3, dtype=np.float32)
+            self.depth_clip_m = self._depth_clip_base
             return
 
         # Depth noise: Gaussian noise injected per-step in _get_depth_image
@@ -194,6 +211,35 @@ class AirSimDroneEnv(gym.Env):
                 self._vio = SimulatedVIO(drift_std, bias_std, self.np_random)
             self._vio.reset(self.np_random)
 
+        # Wind disturbance: sample a random horizontal wind vector each episode
+        wind_max = self._dr_cfg.get("wind_max_ms", 0.0)
+        if wind_max > 0:
+            wx = float(self.np_random.uniform(-wind_max, wind_max))
+            wy = float(self.np_random.uniform(-wind_max, wind_max))
+            try:
+                self.client.simSetWind(airsim.Vector3r(wx, wy, 0.0))
+            except Exception:
+                pass  # graceful degradation if AirSim version doesn't support simSetWind
+
+        # Motor lag: sample a per-episode time constant from [min, max] range
+        lag_range = self._dr_cfg.get("motor_lag_tau", None)
+        if lag_range is not None:
+            try:
+                tau_min, tau_max = lag_range[0], lag_range[1]
+            except (TypeError, IndexError):
+                tau_min = tau_max = float(lag_range)
+            self._tau_motor = float(self.np_random.uniform(tau_min, tau_max))
+        else:
+            self._tau_motor = 0.0
+        self._cmd_vel_filtered = np.zeros(3, dtype=np.float32)
+
+        # Depth clip jitter: vary clip range slightly per episode
+        clip_jitter = self._dr_cfg.get("depth_clip_jitter", 0.0)
+        if clip_jitter > 0:
+            self.depth_clip_m = float(
+                self._depth_clip_base + self.np_random.uniform(-clip_jitter, clip_jitter)
+            )
+
     # ------------------------------------------------------------------
     # Observation
     # ------------------------------------------------------------------
@@ -206,7 +252,10 @@ class AirSimDroneEnv(gym.Env):
             return np.zeros(self.image_shape, dtype=np.float32)
 
         img1d = np.array(responses[0].image_data_float, dtype=np.float32)
-        img1d = img1d.reshape(responses[0].height, responses[0].width)
+        h, w = responses[0].height, responses[0].width
+        if h == 0 or w == 0 or img1d.size == 0:
+            return np.zeros(self.image_shape, dtype=np.float32)
+        img1d = img1d.reshape(h, w)
         img_depth = cv2.resize(img1d, (self.image_shape[1], self.image_shape[0]))
         img_depth = np.clip(img_depth, 0, self.depth_clip_m) / self.depth_clip_m
 
@@ -338,12 +387,18 @@ class AirSimDroneEnv(gym.Env):
 
         if self.goal_navigation:
             goal_obs = self._get_goal_obs()
-            self.state["velocity"] = np.concatenate([vel, goal_obs])
+            velocity = np.concatenate([vel, goal_obs])
         else:
-            self.state["velocity"] = vel
+            velocity = vel
 
+        # Keep self.state updated for deploy.py compatibility (reads state["image"]
+        # for the safety depth check — one-step-stale by design).
         self.state["image"] = depth
-        return self.state
+        self.state["velocity"] = velocity
+
+        # Return a new dict so the caller holds an independent reference;
+        # prevents latent corruption if observation access patterns change.
+        return {"image": depth, "velocity": velocity.copy()}
 
     # ------------------------------------------------------------------
     # Reset
@@ -351,6 +406,26 @@ class AirSimDroneEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        last_exc: Exception | None = None
+        for _attempt in range(self.MAX_RESET_RETRIES):
+            try:
+                return self._reset_inner()
+            except Exception as exc:
+                last_exc = exc
+                if _attempt < self.MAX_RESET_RETRIES - 1:
+                    print(
+                        f"[AirSimDroneEnv] reset() attempt {_attempt + 1} failed: {exc}. "
+                        "Retrying...",
+                        flush=True,
+                    )
+                    time.sleep(1.0)
+
+        raise RuntimeError(
+            f"AirSimDroneEnv.reset() failed after {self.MAX_RESET_RETRIES} attempts"
+        ) from last_exc
+
+    def _reset_inner(self):
+        """Inner reset logic — called by reset() with retry wrapping."""
         # Unpause sim — step() leaves it paused for lockstep,
         # and blocking calls (takeoff, moveToZ) hang on a paused sim.
         self.client.simPause(False)
@@ -381,7 +456,14 @@ class AirSimDroneEnv(gym.Env):
         self._apply_domain_randomization()
         self.prev_action = np.zeros(3, dtype=np.float32)
         self.step_count = 0
-        self._vio_pos_est = np.zeros(2, dtype=np.float32)
+
+        # Initialise VIO position estimate to the actual spawn position so that
+        # domain-randomized spawn jitter doesn't immediately create drift error.
+        spawn_kin = self.client.getMultirotorState().kinematics_estimated
+        self._vio_pos_est = np.array(
+            [spawn_kin.position.x_val, spawn_kin.position.y_val],
+            dtype=np.float32,
+        )
 
         if self.goal_navigation:
             self._waypoint_queue = self._sample_waypoints()
@@ -402,6 +484,18 @@ class AirSimDroneEnv(gym.Env):
         target_vy = action[1] * self.max_vy
         target_yaw_rate = action[2] * self.max_yaw_rate
 
+        # Motor lag: first-order low-pass filter on commanded velocity.
+        # alpha = dt / (dt + tau); alpha=1 when tau=0 (no lag).
+        if self._tau_motor > 0:
+            alpha = self.dt / (self.dt + self._tau_motor)
+            cmd = np.array([target_vx, target_vy, target_yaw_rate], dtype=np.float32)
+            self._cmd_vel_filtered = self._cmd_vel_filtered + alpha * (cmd - self._cmd_vel_filtered)
+            target_vx, target_vy, target_yaw_rate = (
+                float(self._cmd_vel_filtered[0]),
+                float(self._cmd_vel_filtered[1]),
+                float(self._cmd_vel_filtered[2]),
+            )
+
         self.client.moveByVelocityZBodyFrameAsync(
             float(target_vx),
             float(target_vy),
@@ -419,10 +513,24 @@ class AirSimDroneEnv(gym.Env):
         obs = self._get_obs()
         self.step_count += 1
 
-        # Integrate VIO velocity to track estimated position (dead-reckoning)
+        # Ground-truth kinematics — fetched once and reused for VIO integration,
+        # drift error, and the info dict (avoids a second RPC call).
+        kin_for_info = self.client.getMultirotorState().kinematics_estimated
+
+        # Integrate VIO velocity to track estimated position (dead-reckoning).
+        # Rotate body-frame [vx, vy] to world-frame before integrating into
+        # the world-frame position estimate.
         if self._vio_enabled:
-            vio_vel_xy = obs["velocity"][:2]  # vx, vy body frame
-            self._vio_pos_est = self._vio_pos_est + vio_vel_xy * self.dt
+            vio_vel_body = obs["velocity"][:2]  # [vx, vy] in body frame
+            q = kin_for_info.orientation
+            yaw = math.atan2(
+                2.0 * (q.w_val * q.z_val + q.x_val * q.y_val),
+                1.0 - 2.0 * (q.y_val ** 2 + q.z_val ** 2),
+            )
+            cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+            vx_w = vio_vel_body[0] * cos_y - vio_vel_body[1] * sin_y
+            vy_w = vio_vel_body[0] * sin_y + vio_vel_body[1] * cos_y
+            self._vio_pos_est = self._vio_pos_est + np.array([vx_w, vy_w], dtype=np.float32) * self.dt
 
         # Collision detection
         vx_body = obs["velocity"][0]
@@ -431,11 +539,6 @@ class AirSimDroneEnv(gym.Env):
             col_info.has_collided
             and col_info.time_stamp != self._last_col_ts
         )
-
-        # Ground-truth position for localisation_drift metric and drift reward.
-        # Fetched here (before reward calls) so the same RPC result is reused
-        # for both drift_error computation and the info dict.
-        kin_for_info = self.client.getMultirotorState().kinematics_estimated
 
         # Drift error: L2 distance between VIO-estimated and ground-truth position
         drift_error = 0.0
@@ -467,9 +570,20 @@ class AirSimDroneEnv(gym.Env):
         else:
             goal_reached = False
             all_goals_done = False
+            # Use centre ROI to avoid ground-pixel false triggers.
+            # Global image.min() fires the proximity penalty every step because
+            # bottom pixels of the 90° FOV camera see the ground at <2m altitude.
+            # Squeeze channel dim if present: (H,W,1) → (H,W) or (H,W) → (H,W)
+            depth_frame = obs["image"][..., 0] if obs["image"].ndim == 3 else obs["image"]
+            _rf = 0.3
+            _h, _w = depth_frame.shape
+            _r0, _r1 = int(_h * (1 - _rf) / 2), int(_h * (1 + _rf) / 2)
+            _c0, _c1 = int(_w * (1 - _rf) / 2), int(_w * (1 + _rf) / 2)
+            min_depth = float(depth_frame[_r0:_r1, _c0:_c1].min())
             reward, reward_info = self.reward_fn(
                 vx_body, has_collided, action, self.prev_action,
                 drift_error=drift_error,
+                min_depth=min_depth,
             )
 
         self.prev_action = action.copy()
@@ -481,6 +595,7 @@ class AirSimDroneEnv(gym.Env):
             **reward_info,
             "vx_body": vx_body,
             "step_count": self.step_count,
+            "has_collided": has_collided,
             "x_gt": float(kin_for_info.position.x_val),
             "y_gt": float(kin_for_info.position.y_val),
         }

@@ -1,6 +1,5 @@
 """Tests for SimulatedVIO dead-reckoning estimator. Runs without AirSim."""
 import numpy as np
-import pytest
 
 
 def test_vio_drift_accumulates_over_steps():

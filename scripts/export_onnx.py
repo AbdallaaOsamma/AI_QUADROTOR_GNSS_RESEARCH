@@ -51,7 +51,7 @@ class PolicyWrapper(torch.nn.Module):
 def export_to_onnx(
     model_path: str,
     output_path: str,
-    frame_stack: int = 4,
+    frame_stack: int | None = None,
     verbose: bool = True,
 ) -> bool:
     """Export SB3 PPO policy to ONNX format.
@@ -88,26 +88,41 @@ def export_to_onnx(
         print(f"[export] Observation space: {model.observation_space}")
         print(f"[export] Action space: {model.action_space}")
 
-    # Validate observation space structure
+    # Validate observation space structure and auto-detect shapes
     try:
-        assert "image" in model.observation_space.spaces
-        assert "velocity" in model.observation_space.spaces
+        assert "image" in model.observation_space.spaces, \
+            "observation space missing 'image' key"
+        assert "velocity" in model.observation_space.spaces, \
+            "observation space missing 'velocity' key"
         image_shape = model.observation_space.spaces["image"].shape
         velocity_shape = model.observation_space.spaces["velocity"].shape
-        assert image_shape == (84, 84, frame_stack), (
-            f"Expected image shape (84, 84, {frame_stack}), "
-            f"got {image_shape}"
-        )
-        assert velocity_shape == (3,), (
-            f"Expected velocity shape (3,), got {velocity_shape}"
-        )
+        assert len(image_shape) == 3, \
+            f"Expected image shape (H, W, C), got {image_shape}"
     except AssertionError as e:
         print(f"[export] ERROR: Observation space mismatch: {e}")
         return False
 
-    # Create dummy inputs
-    dummy_image = torch.randn(1, 84, 84, frame_stack, dtype=torch.float32)
-    dummy_velocity = torch.randn(1, 3, dtype=torch.float32)
+    # Auto-detect frame_stack and velocity dim from the saved observation space.
+    # VecFrameStack multiplies the channel dim (image_shape[2]) and stacks
+    # velocity, so we read the actual shapes rather than using CLI defaults.
+    detected_frame_stack = image_shape[2]
+    detected_vel_dim = velocity_shape[0]
+
+    if frame_stack is not None and frame_stack != detected_frame_stack:
+        print(
+            f"[export] WARNING: CLI --frame_stack={frame_stack} differs from "
+            f"model obs space ({detected_frame_stack}). Using model value."
+        )
+    frame_stack = detected_frame_stack
+
+    if verbose:
+        print(f"[export] Auto-detected image shape : {image_shape}")
+        print(f"[export] Auto-detected velocity dim: {detected_vel_dim}")
+        print(f"[export] Frame stack               : {frame_stack}")
+
+    # Create dummy inputs matching the actual saved observation space
+    dummy_image = torch.randn(1, *image_shape, dtype=torch.float32)
+    dummy_velocity = torch.randn(1, detected_vel_dim, dtype=torch.float32)
 
     # Test inference with SB3's predict method
     try:
@@ -234,8 +249,8 @@ def main():
     parser.add_argument(
         "--frame_stack",
         type=int,
-        default=4,
-        help="Frame stack depth (default 4)",
+        default=None,
+        help="Frame stack depth (auto-detected from model obs space if omitted)",
     )
     parser.add_argument(
         "--quiet",

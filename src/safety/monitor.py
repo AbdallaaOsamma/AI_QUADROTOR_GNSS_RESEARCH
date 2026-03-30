@@ -109,11 +109,13 @@ class SafetyMonitor:
         # 1. Velocity clamp
         vx, vy, yaw_rate_deg = self.clamp_velocity(vx, vy, yaw_rate_deg)
 
-        # 2. Proximity scaling
+        # 2. Proximity scaling (only applied to forward flight — negative vx is
+        #    backward flight away from the obstacle and must not be reduced)
         if min_depth_m is not None:
             scale = self.proximity_scale(min_depth_m)
             info["prox_scale"] = scale
-            vx *= scale
+            if vx > 0:
+                vx *= scale
 
         # 3. Altitude guard
         if current_alt is not None and target_alt is not None:

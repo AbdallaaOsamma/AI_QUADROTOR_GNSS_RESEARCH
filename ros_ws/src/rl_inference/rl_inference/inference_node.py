@@ -8,6 +8,10 @@ Publishes:
   /drone/cmd_vel            (geometry_msgs/Twist -- vx, vy, yaw_rate)
 
 Run: ros2 run rl_inference inference_node --ros-args -p model_path:=model.onnx
+
+IMPORTANT: set depth_clip_m to match the value used during training (env.depth_clip_m in
+the YAML config). Default is 20.0 (base training config). The parking finetune config
+uses depth_clip_m=8.0 — pass -p depth_clip_m:=8.0 when deploying that model.
 """
 from collections import deque
 
@@ -34,7 +38,6 @@ class InferenceNode:
 
     def __init__(self):
         import rclpy
-        from rclpy.node import Node  # noqa: F811
         from geometry_msgs.msg import Twist, TwistStamped
         from rcl_interfaces.msg import ParameterDescriptor
         from sensor_msgs.msg import Image
@@ -55,6 +58,16 @@ class InferenceNode:
         self._node.declare_parameter("max_vx", 3.0)
         self._node.declare_parameter("max_vy", 1.0)
         self._node.declare_parameter("max_yaw_rate_deg", 45.0)
+        self._node.declare_parameter(
+            "depth_clip_m",
+            20.0,
+            ParameterDescriptor(
+                description=(
+                    "Depth clip distance in metres. MUST match env.depth_clip_m "
+                    "from the YAML config used to train the exported ONNX model."
+                )
+            ),
+        )
 
         model_path = self._node.get_parameter("model_path").value
         self.max_vx = self._node.get_parameter("max_vx").value
@@ -62,6 +75,7 @@ class InferenceNode:
         self.max_yaw_rate = np.deg2rad(
             self._node.get_parameter("max_yaw_rate_deg").value
         )
+        self._depth_clip_m = self._node.get_parameter("depth_clip_m").value
 
         if not _ORT_AVAILABLE:
             self._node.get_logger().error(
@@ -80,7 +94,12 @@ class InferenceNode:
             * self.FRAME_STACK,
             maxlen=self.FRAME_STACK,
         )
-        self._latest_velocity = np.zeros(3, dtype=np.float32)
+        # Velocity buffer mirrors VecFrameStack: FRAME_STACK consecutive
+        # body-frame [vx, vy, yaw_rate] readings are concatenated → (12,)
+        self._velocity_buffer: deque = deque(
+            [np.zeros(3, dtype=np.float32)] * self.FRAME_STACK,
+            maxlen=self.FRAME_STACK,
+        )
 
         self._sub_depth = self._node.create_subscription(
             Image, "/camera/depth/image_raw", self._depth_cb, 10
@@ -112,20 +131,17 @@ class InferenceNode:
             return
 
         resized = cv2.resize(depth_m, (self.IMAGE_SIZE, self.IMAGE_SIZE))
-        clipped = np.clip(resized, 0.0, 20.0) / 20.0
+        clipped = np.clip(resized, 0.0, self._depth_clip_m) / self._depth_clip_m
         frame = clipped[:, :, np.newaxis].astype(np.float32)
         self._frame_buffer.append(frame)
 
     def _state_cb(self, msg):
-        """Store latest body-frame velocity from state topic."""
-        self._latest_velocity = np.array(
-            [
-                msg.twist.linear.x,
-                msg.twist.linear.y,
-                msg.twist.angular.z,
-            ],
+        """Append latest body-frame velocity to the rolling buffer."""
+        vel = np.array(
+            [msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z],
             dtype=np.float32,
         )
+        self._velocity_buffer.append(vel)
 
     def _inference_step(self):
         """Run ONNX inference and publish velocity command at 10 Hz."""
@@ -137,7 +153,9 @@ class InferenceNode:
         image = np.concatenate(list(self._frame_buffer), axis=-1)[
             np.newaxis
         ]  # (1, 84, 84, 4) NHWC — see note above
-        velocity = self._latest_velocity[np.newaxis]  # (1, 3)
+        # Concatenate FRAME_STACK velocity readings → (1, 12) to match
+        # the stacked velocity dimension produced by VecFrameStack during training.
+        velocity = np.concatenate(list(self._velocity_buffer))[np.newaxis]  # (1, 12)
 
         action = self.session.run(
             ["action"],

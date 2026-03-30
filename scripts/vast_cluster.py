@@ -291,7 +291,7 @@ def check_status():
                 for line in out.strip().split("\n")[-3:]:
                     print(f"    {line.strip()}")
             else:
-                print(f"    (no tmux session or output)")
+                print("    (no tmux session or output)")
 
     print(f"\n  Total cluster cost: ${total_cost:.3f}/hr (${total_cost*24:.2f}/day)")
     print(f"{'='*80}\n")
@@ -340,7 +340,7 @@ def launch_cluster(experiments, timesteps, budget_per_hour=5.0):
     """Main launch: rent GPUs, bootstrap, assign experiments, go."""
     n = len(experiments)
     print(f"\n{'='*80}")
-    print(f"  VAST.AI GPU CLUSTER LAUNCH")
+    print("  VAST.AI GPU CLUSTER LAUNCH")
     print(f"  {n} experiments × {timesteps:,} steps each")
     print(f"  Estimated time: ~2-4 hours (vs ~{n*3} hours sequential)")
     print(f"  Estimated cost: ~${n * 0.30 * 3:.2f} (${0.30:.2f}/hr × {n} GPUs × ~3hrs)")
@@ -372,7 +372,7 @@ def launch_cluster(experiments, timesteps, budget_per_hour=5.0):
         print(f"[WARN] Only rented {len(instance_ids)}/{n} instances")
 
     # 3. Wait for all to start
-    print(f"\n[3/5] Waiting for instances to come online...")
+    print("\n[3/5] Waiting for instances to come online...")
     wait_for_instances(instance_ids, timeout=600)
 
     # Get SSH details
@@ -380,7 +380,7 @@ def launch_cluster(experiments, timesteps, budget_per_hour=5.0):
     running = [i for i in instances if i["id"] in instance_ids and i["actual_status"] == "running"]
 
     # Attach SSH keys
-    print(f"\n  Attaching SSH keys...")
+    print("\n  Attaching SSH keys...")
     for inst in running:
         attach_ssh_key(inst["id"])
     time.sleep(10)  # wait for keys to propagate
@@ -422,11 +422,11 @@ def launch_cluster(experiments, timesteps, budget_per_hour=5.0):
         run_vastai("label", "instance", str(inst["id"]), exp["name"])
 
     print(f"\n{'='*80}")
-    print(f"  CLUSTER LAUNCHED!")
+    print("  CLUSTER LAUNCHED!")
     print(f"  {len(ready)}/{n} experiments running on {len(ready)} GPUs")
-    print(f"  Monitor: python scripts/vast_cluster.py --status")
-    print(f"  Collect: python scripts/vast_cluster.py --collect")
-    print(f"  Destroy: python scripts/vast_cluster.py --destroy")
+    print("  Monitor: python scripts/vast_cluster.py --status")
+    print("  Collect: python scripts/vast_cluster.py --collect")
+    print("  Destroy: python scripts/vast_cluster.py --destroy")
     print(f"{'='*80}\n")
 
 
